@@ -72,27 +72,59 @@
 ;; typing 'c' to collapse all expanded forms back to their original
 ;; text.
 ;;
+;; Note that by moving point around in the macro expansion, you can
+;; macro-expand sub-forms before fully expanding their enclosing
+;; form. For example, with `cl' loaded, try expanding
+;;
+;;   (dolist (l list-of-lists)
+;;     (incf (car l)))
+;;
+;; which produces the following expansion:
+;;
+;;   (block nil
+;;     (let
+;;         ((--cl-dolist-temp-- list-of-lists)
+;;          l)
+;;       (while --cl-dolist-temp--
+;;         (setq l
+;;               (car --cl-dolist-temp--))
+;;         (incf
+;;          (car l))
+;;         (setq --cl-dolist-temp--
+;;               (cdr --cl-dolist-temp--)))
+;;       nil))
+;;
+;; where `block' and `incf' are both macros.
+;;
+;; You can then either continue expanding the `block' form, which
+;; corresponds to the real order of macro expansion, or type `n' to
+;; move to the unexpanded `incf' and expand it to a `callf' form and
+;; finally to a `let*' form.  However, note that the expansion of a
+;; form always works on the original, unexpanded text of its
+;; sub-forms.  This might look confusing: if you fully expand the
+;; `incf' first in the above example, then expand the `block', the
+;; result will again have an unexpanded `incf' form in it.  But it
+;; corresponds to the way real macro expansion works: the outer form
+;; is expanded into a non-macro before any inner forms are
+;; evaluated.
+;;
+;; Why allow expanding sub-forms out of order like this at all? The
+;; main reason is for debugging macros which expand into another
+;; macro, like `lexical-let', that programmatically expands its
+;; contents in order to rewrite them.  In this case, expanding the
+;; sub-forms first allows you to see what `lexical-let' would
+;; compute via `cl-macroexpand-all'.
+;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
 ;; Bugs and known limitations:
 ;;
-;; `macrostep-mode' uses a change group to cleanly return the buffer
-;; to its state before macro expansion. If Emacs runs out of memory
-;; for undo information it could potentially lose the original state
-;; of the buffer. Save your buffers first to be safe.
-;;
 ;; You can evaluate and edebug macro-expanded forms and step through
 ;; the macro-expanded version, but the form that `eval-defun' and
 ;; friends read from the buffer won't have the uninterned symbols of
-;; the real macro expansion. This will probably work OK with CL-style
+;; the real macro expansion.  This will probably work OK with CL-style
 ;; (gensym)s, but may cause problems with (make-symbol ...) symbols if
 ;; they have the same print name as another symbol in the expansion.
-;;
-;; Although you can macro-expand sub-forms before fully expanding
-;; their enclosing form, going back and expanding the enclosing form
-;; always works on the unexpanded versions of the sub-forms. (Although
-;; this looks confusing, it does better reflect how macro expansion
-;; actually works).
 ;;
 ;; The macro stepper doesn't bother trying to determine whether or not
 ;; a sub-form is in an evaluated position before highlighting it as a
@@ -114,18 +146,6 @@
 (defvar macrostep-overlays nil
   "List of all macro stepper overlays in the current buffer.")
 (make-variable-buffer-local 'macrostep-overlays)
-  
-(defvar macrostep-change-group nil
-  "Change group for cleanly undoing all macro expansions when exiting macrostep-mode.")
-(make-variable-buffer-local 'macrostep-change-group)
-
-(defvar macrostep-save-undo-limit nil
-  "Saved value of `undo-limit' to restore when exiting `macrostep-mode'.")
-(make-variable-buffer-local 'macrostep-save-undo-limit)
-
-(defvar macrostep-save-undo-strong-limit nil
-  "Saved value of `undo-strong-limit' to restore when exiting `macrostep-mode'.")
-(make-variable-buffer-local 'macrostep-save-undo-strong-limit)
 
 (defvar macrostep-gensym-depth nil
   "Number of macro expansion levels that have introduced gensyms so far.")
@@ -235,25 +255,12 @@ quit and return to normal editing.
   :group macrostep
   (setq buffer-read-only macrostep-mode)
   (if macrostep-mode
-      (progn
-	(message
-	 (substitute-command-keys
-	  "\\<macrostep-keymap>Entering macro stepper mode. Use \\[macrostep-expand] to expand, \\[macrostep-collapse] to collapse, \\[macrostep-collapse-all] to exit."))
-	;; Everything we do will go in an atomic change group for undoing
-	(setq macrostep-change-group (prepare-change-group)
-	      macrostep-save-undo-limit undo-limit
-	      macrostep-save-undo-strong-limit undo-strong-limit
-	      undo-limit most-positive-fixnum
-	      undo-strong-limit most-positive-fixnum)
-	(activate-change-group macrostep-change-group))
+      (message
+       (substitute-command-keys
+        "\\<macrostep-keymap>Entering macro stepper mode. Use \\[macrostep-expand] to expand, \\[macrostep-collapse] to collapse, \\[macrostep-collapse-all] to exit."))
 
-    ;; Collapse any remaining overlays when exiting mode
-    (when macrostep-overlays (macrostep-collapse-all))
-    ;; and undo all our changes
-    (cancel-change-group macrostep-change-group)
-    (setq macrostep-change-group nil
-	  undo-limit macrostep-save-undo-limit
-	  undo-strong-limit macrostep-save-undo-strong-limit)))
+    ;; Exiting mode: collapse any remaining overlays
+    (when macrostep-overlays (macrostep-collapse-all))))
 
 
 ;;; Interactive functions
@@ -322,8 +329,12 @@ If no more macro expansions are visible after this, exit
 (defun macrostep-collapse-all ()
   "Collapse all visible macro expansions and exit `macrostep-mode'."
   (interactive)
-  (dolist (overlay macrostep-overlays)
-    (macrostep-collapse-overlay overlay t))
+  (let ((buffer-read-only nil))
+    (dolist (overlay macrostep-overlays)
+      (let ((outermost (= (overlay-get overlay 'priority) 1)))
+        ;; We only need restore the original text for the outermost
+        ;; overlays
+        (macrostep-collapse-overlay overlay (not outermost)))))
   (setq macrostep-overlays nil)
   (macrostep-mode 0))
 
@@ -408,20 +419,18 @@ Also moves point to the beginning of the returned s-expression."
 	(sexp-at-point))))
 
 
-(defun macrostep-collapse-overlay (overlay &optional collapse-all-p)
+(defun macrostep-collapse-overlay (overlay &optional no-restore-p)
   "Collapse a macro-expansion overlay and restore the unexpanded source text.
 
-If COLLAPSE-ALL-P is non-nil, do not restore the original source
-text. This is useful only when collapsing all overlays (in which
-case the change group restores the buffer to its previous state)
-or when called recursively by `macrostep-collapse-overlays-in' to
-collapse an overlay entirely contained within another (in which
-case restoring the outer overlay's source text is enough)."
+As a minor optimization, does not restore the original source
+text if NO-RESTORE-P is non-nil. This is safe to do when
+collapsing all the sub-expansions of an outer overlay, since the
+outer overlay will restore the original source itself."
   (when (and (overlay-start overlay)
 	     (eq (overlay-buffer overlay) (current-buffer)))
       ;; If we're cleaning up we don't need to bother restoring text
       ;; or checking for inner overlays to delete
-      (unless collapse-all-p
+      (unless no-restore-p
 	(macrostep-collapse-overlays-in
 	 (overlay-start overlay) (overlay-end overlay))
 	(let ((text (overlay-get overlay 'macrostep-original-text)))
