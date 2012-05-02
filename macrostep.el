@@ -5,8 +5,8 @@
 ;; Author:     Jonathan Oddie <j.j.oddie@gmail.com>
 ;; Maintainer: Jonathan Oddie <j.j.oddie@gmail.com>
 ;; Created:    16 January 2012
-;; Updated:    21 January 2012
-;; Version:    0.1
+;; Updated:    02 May 2012
+;; Version:    0.2
 ;; Keywords:   lisp, languages, macro, debugging
 
 ;; This file is NOT part of GNU Emacs.
