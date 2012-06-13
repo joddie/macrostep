@@ -425,7 +425,9 @@ Also moves point to the beginning of the returned s-expression."
 As a minor optimization, does not restore the original source
 text if NO-RESTORE-P is non-nil. This is safe to do when
 collapsing all the sub-expansions of an outer overlay, since the
-outer overlay will restore the original source itself."
+outer overlay will restore the original source itself.
+
+Also removes the overlay from `macrostep-overlays'."
   (when (and (overlay-start overlay)
 	     (eq (overlay-buffer overlay) (current-buffer)))
       ;; If we're cleaning up we don't need to bother restoring text
@@ -435,7 +437,7 @@ outer overlay will restore the original source itself."
 	 (overlay-start overlay) (overlay-end overlay))
 	(let ((text (overlay-get overlay 'macrostep-original-text)))
 	  (goto-char (overlay-start overlay))
-	  (macrostep-replace-sexp-at-point text)))
+	  (macrostep-replace-sexp-at-point text (stringp text))))
       ;; Remove overlay from the list and delete it
       (setq macrostep-overlays
 	    (delq overlay macrostep-overlays))
@@ -451,21 +453,28 @@ Will not collapse overlays that begin at START and end at END."
 	     (overlay-get ol 'macrostep-original-text))
 	(macrostep-collapse-overlay ol t))))
 
-(defun macrostep-replace-sexp-at-point (sexp)
-  "Replace the form following point with SEXP."
+(defun macrostep-replace-sexp-at-point (sexp &optional original)
+  "Replace the form following point with SEXP.
+
+If ORIGINAL is non-nil, SEXP is assumed to be a string
+representing the original source text, and inserted verbatim as a
+replacement for the form following point. Otherwise, if ORIGINAL
+is nil, SEXP is treated as the macro expansion of the source,
+inserted using `macrostep-print-sexp' and pretty-printed using
+`pp-buffer'."
   (let ((print-quoted t))
     (save-excursion
       ;; Insert new text first so that existing overlays don't
       ;; evaporate
-      (if (stringp sexp)
-	  (insert sexp)		      ; insert original source text
+      (if original
+	  (insert sexp)                 ; insert original source text
 	(macrostep-print-sexp sexp))
       ;; Delete the old form and remove any sub-form overlays in it
       (let ((start (point)) (end (scan-sexps (point) 1)))
 	(macrostep-collapse-overlays-in start end)
 	(delete-region start end)))
 	
-    (unless (stringp sexp)		; inserting macro expansion
+    (unless original                   ; inserting macro expansion
       ;; point is now before the expanded form; pretty-print it
       (narrow-to-region (point) (scan-sexps (point) 1))
       (save-excursion
