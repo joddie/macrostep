@@ -168,35 +168,35 @@
 (defface macrostep-gensym-1
   '((((min-colors 16581375)) :background "#b0c4de")
     (((min-colors 8)) :background "cyan")
-    (t :reverse-video))
+    (t :inverse-video t))
   "Face for gensyms created in the first level of macro expansion."
   :group 'macrostep)
 
 (defface macrostep-gensym-2
   '((((min-colors 16581375)) :background "#8fbc8f")
     (((min-colors 8)) :background "#00cd00")
-    (t :reverse-video))
+    (t :inverse-video t))
   "Face for gensyms created in the second level of macro expansion."
   :group 'macrostep)
 
 (defface macrostep-gensym-3
   '((((min-colors 16581375)) :background "#daa520")
     (((min-colors 8)) :background "yellow")
-    (t :reverse-video))
+    (t :inverse-video t))
   "Face for gensyms created in the third level of macro expansion."
   :group 'macrostep)
 
 (defface macrostep-gensym-4
   '((((min-colors 16581375)) :background "#cd5c5c")
     (((min-colors 8)) :background "red")
-    (t :reverse-video))
+    (t :inverse-video t))
   "Face for gensyms created in the fourth level of macro expansion."
   :group 'macrostep)
 
 (defface macrostep-gensym-5
   '((((min-colors 16581375)) :background "#da70d6")
     (((min-colors 8)) :background "magenta")
-    (t :reverse-video))
+    (t :inverse-video t))
   "Face for gensyms created in the fifth level of macro expansion."
   :group 'macrostep)
 
