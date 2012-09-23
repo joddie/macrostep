@@ -2,10 +2,10 @@
 
 ;; Copyright (C) 2012 Jonathan Oddie <j.j.oddie@gmail.com>
 
-;; Author:     Jonathan Oddie <j.j.oddie@gmail.com>
-;; Maintainer: Jonathan Oddie <j.j.oddie@gmail.com>
+;; Author:     joddie <j.j.oddie@gmail.com>
+;; Maintainer: joddie <j.j.oddie@gmail.com>
 ;; Created:    16 January 2012
-;; Updated:    02 May 2012
+;; Updated:    23 September 2012
 ;; Version:    0.2
 ;; Keywords:   lisp, languages, macro, debugging
 
@@ -26,60 +26,76 @@
 
 ;;; Commentary:
  
-;; `macrostep-mode' is a minor mode for interactively stepping through
-;; the expansion of macros in Emacs Lisp source code. It lets you see
-;; exactly what happens at each step of the expansion process by
-;; pretty-printing the expanded forms inline in the source buffer,
-;; which is read-only while macro expansions are visible. You can
-;; expand and collapse macro forms one step at a time, and evaluate
-;; or instrument them for debugging with Edebug as normal (but see
-;; "Bugs and known limitations", below). Single-stepping through the
-;; expansion is useful for debugging macros that expand into another
-;; macro form, especially one like `lexical-let' that does significant
-;; rewriting. These can be difficult to debug with Emacs' built-in
-;; `macroexpand' because `macroexpand' continues expansion until the
-;; top-level form is no longer a macro call.
+;; 1.1 Overview 
+;; =============
+;;    `macrostep-mode' is a minor mode for interactively stepping through
+;;    the expansion of macros in Emacs Lisp source code. It lets you see
+;;    exactly what happens at each step of the expansion process by
+;;    pretty-printing the expanded forms inline in the source buffer,
+;;    which is read-only while macro expansions are visible. You can
+;;    expand and collapse macro forms one step at a time, and evaluate or
+;;    instrument them for debugging with Edebug as normal (but see "Bugs
+;;    and known limitations", below). Single-stepping through the
+;;    expansion is useful for debugging macros that expand into another
+;;    macro form, especially one like `lexical-let' that does significant
+;;    rewriting. These can be difficult to debug with Emacs' built-in
+;;    `macroexpand', because `macroexpand' continues expansion until the
+;;    top-level form is no longer a macro call.
 ;;
-;; macrostep-mode adds some simple additional fontification to
-;; macro-expanded text. The heads of macro sub-forms are fontified
-;; using `macrostep-macro-face'. Uninterned symbols (gensyms) are
-;; fontified based on which step in the expansion created them, to
-;; distinguish them from normal symbols and from other gensyms with
-;; the same print name. Use `customize-group' with the "macrostep"
-;; group to customize these faces.
+;;    `macrostep-mode' also adds some simple additional fontification to
+;;    macro-expanded code. The heads of macro sub-forms are fontified
+;;    using `macrostep-macro-face'. Uninterned symbols (gensyms) are
+;;    fontified based on which step in the expansion created them, to
+;;    distinguish them from normal symbols and from other gensyms with
+;;    the same print name. Use `customize-group' with the `macrostep'
+;;    group to customize these faces.
 ;;
-;; The standard macrostep-mode keybindings are the following:
+;; 1.2 Key-bindings and usage 
+;; ===========================
+;;    The standard macrostep-mode keybindings are the following:
+;; 
+;;     e, =, RET : expand the macro form following point one step
+;;     c, u, DEL : collapse the form following point
+;;     q, C-c C-c: collapse all expanded forms and exit macrostep-mode
+;;     n, TAB    : jump to the next macro form in the expansion
+;;     p, M-TAB  : jump to the previous macro form in the expansion
 ;;
-;;     e, =, RET     expand the macro form following point one step
-;;     c, u, DEL     collapse the form following point
-;;     q, C-c C-c    collapse all expanded forms and exit macrostep-mode
-;;     n, TAB        jump to the next macro form in the expansion
-;;     p, M-TAB      jump to the previous macro form in the expansion
+;;     It's not very useful to enable and disable macrostep-mode
+;;     directly. Instead, bind `macrostep-expand' to a key in
+;;     `emacs-lisp-mode-map', for example C-c e:
 ;;
-;; It's not very useful to enable and disable macrostep-mode
-;; directly. Instead, bind `macrostep-expand' to a key in
-;; `emacs-lisp-mode-map', for example C-c e:
 ;;
-;; (add-hook
-;;  'emacs-lisp-mode-hook
-;;  (lambda ()
-;;    (define-key emacs-lisp-mode-map (kbd "C-c e") 'macrostep-expand)))
 ;;
-;; You can then enter macrostep-mode and expand a macro form
-;; completely by typing C-c e e e ...  as many times as necessary.
+;;   (add-hook
+;;    'emacs-lisp-mode-hook
+;;    (lambda ()
+;;      (define-key emacs-lisp-mode-map (kbd "C-c e") 'macrostep-expand)))
 ;;
-;; Exit macrostep-mode either with 'q', C-c C-c, or by successively
-;; typing 'c' to collapse all expanded forms back to their original
-;; text.
 ;;
-;; Note that by moving point around in the macro expansion, you can
-;; macro-expand sub-forms before fully expanding their enclosing
-;; form. For example, with `cl' loaded, try expanding
+;;     You can then enter macrostep-mode and expand a macro form
+;;     completely by typing =C-c e e e ...= as many times as necessary.
+;;
+;;     Exit macrostep-mode either with `q', `C-c C-c', or by successively
+;;     typing `c' to collapse all expanded forms back to their original
+;;     text.
+;;
+;; 1.3 Expanding sub-forms 
+;; ========================
+;;     By moving point around in the macro expansion (perhaps using `n'
+;;     and `p'), you can macro-expand sub-forms before fully expanding
+;;     the enclosing form. This can be useful in some cases, but you
+;;     should keep in mind that it does not correspond to the way Emacs
+;;     actually expands macro calls when evaluating or compiling your
+;;     code.  Macro expansion in Emacs Lisp always proceeds by fully
+;;     expanding the outer form to a non-macro form before doing anything
+;;     with the sub-forms.
+;;    
+;;     For example, with `cl' loaded, try expanding the following form:
 ;;
 ;;   (dolist (l list-of-lists)
-;;     (incf (car l)))
+;;    (incf (car l)))
 ;;
-;; which produces the following expansion:
+;;    to produce the following:
 ;;
 ;;   (block nil
 ;;     (let
@@ -94,47 +110,48 @@
 ;;               (cdr --cl-dolist-temp--)))
 ;;       nil))
 ;;
-;; where `block' and `incf' are both macros.
+;;    where the forms beginning `block' and `incf' are both macro calls.
 ;;
-;; You can then either continue expanding the `block' form, which
-;; corresponds to the real order of macro expansion, or type `n' to
-;; move to the unexpanded `incf' and expand it to a `callf' form and
-;; finally to a `let*' form.  However, note that the expansion of a
-;; form always works on the original, unexpanded text of its
-;; sub-forms.  This might look confusing: if you fully expand the
-;; `incf' first in the above example, then expand the `block', the
-;; result will again have an unexpanded `incf' form in it.  But it
-;; corresponds to the way real macro expansion works: the outer form
-;; is expanded into a non-macro before any inner forms are
-;; evaluated.
+;;    At this point, you can either continue expanding the `block' form
+;;    -- which corresponds to the real order of macro expansion in
+;;    evaluation -- or type `n' to move point to the unexpanded `incf'
+;;    and expand it to a `callf' form and finally to a =let*= form.  If
+;;    you then move point back to the `block' and expand it, an
+;;    unexpanded `incf' form appears again in the result.  This might
+;;    look visually confusing, but it at least corresponds to the way
+;;    real macro expansion works.
 ;;
-;; Why allow expanding sub-forms out of order like this at all? The
-;; main reason is for debugging macros which expand into another
-;; macro, like `lexical-let', that programmatically expands its
-;; contents in order to rewrite them.  In this case, expanding the
-;; sub-forms first allows you to see what `lexical-let' would
-;; compute via `cl-macroexpand-all'.
+;;    Why allow expanding sub-forms out of order like this at all? The
+;;    main reason is for debugging macros which expand into another
+;;    macro, like `lexical-let', that programmatically expands its
+;;    contents in order to rewrite them.  In this case, expanding the
+;;    sub-forms first allows you to see what `lexical-let' would compute
+;;    via `cl-macroexpand-all'.
 ;;
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
-;; Bugs and known limitations:
+;; 1.4 Bugs and known limitations: 
+;; ================================
+;;    You can evaluate and edebug macro-expanded forms and step through
+;;    the macro-expanded version, but the form that `eval-defun' and
+;;    friends read from the buffer won't have the uninterned symbols of
+;;    the real macro expansion.  This will probably work OK with CL-style
+;;    `(gensym)'s, but may cause problems with =(make-symbol ...)=
+;;    symbols if they have the same print name as another symbol in the
+;;    expansion. It's possible that using `print-circle' and
+;;    `print-gensym' could get around this.
 ;;
-;; You can evaluate and edebug macro-expanded forms and step through
-;; the macro-expanded version, but the form that `eval-defun' and
-;; friends read from the buffer won't have the uninterned symbols of
-;; the real macro expansion.  This will probably work OK with CL-style
-;; (gensym)s, but may cause problems with (make-symbol ...) symbols if
-;; they have the same print name as another symbol in the expansion.
+;;    The macro stepper doesn't bother trying to determine whether or not
+;;    a sub-form is in an evaluated position before highlighting it as a
+;;    macro. It does exclude `lambda' from treatment as a macro, since
+;;    that leads to an endless series of expansions: =(function (function
+;;    ... ))=. It would be better to recognise `function', `quote' and
+;;    other special forms using their edebug-form-spec property.
 ;;
-;; The macro stepper doesn't bother trying to determine whether or not
-;; a sub-form is in an evaluated position before highlighting it as a
-;; macro. It does exclude `lambda' from treatment as a macro, since
-;; that leads to an endless series of expansions: (function (function
-;; ... )). It would be better to recognise `function', `quote' and
-;; other special forms using their edebug-form-spec property.
+;;    Macro-expanding a call to an autoloaded macro doesn't work. This
+;;    shouldn't be too hard to fix.
 ;;
-;; Please send other bug reports and feature requests to the author,
-;; j.j.oddie@gmail.com
+;;    Please send other bug reports and feature requests to the author.
+;;
 
 ;;; Code:
 
