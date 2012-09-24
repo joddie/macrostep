@@ -8,6 +8,7 @@
 ;; Updated:    23 September 2012
 ;; Version:    0.2
 ;; Keywords:   lisp, languages, macro, debugging
+;; Url:        https://github.com/joddie/macrostep
 
 ;; This file is NOT part of GNU Emacs.
 
