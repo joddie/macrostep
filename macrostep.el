@@ -566,15 +566,21 @@ sub-forms. See also `macrostep-sexp-at-point'."
 	       (insert " ")
 	       (setq sexp (cdr sexp)))
 	     ;; print remaining list elements
-	     (dolist (inner sexp)
-	       (macrostep-print-sexp inner)
-	       (insert " "))
-	     (backward-delete-char 1)
+             (while sexp
+               (if (listp sexp)
+                   (progn
+                     (macrostep-print-sexp (car sexp))
+                     (when (cdr sexp) (insert " "))
+                     (setq sexp (cdr sexp)))
+                 ;; Print tail of dotted list
+                 (insert ". ")
+                 (macrostep-print-sexp sexp)
+                 (setq sexp nil)))
 	     (insert ")")))))
 
    ;; print non-lists as normal
    (t (prin1 sexp (current-buffer)))))
-  
+
 
 
 (provide 'macrostep)
