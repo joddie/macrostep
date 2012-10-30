@@ -120,13 +120,14 @@
    ... ))=. It would be better to recognise =function=, =quote= and
    other special forms using their =edebug-form-spec= property.
 
-   Macro-expanding a call to an autoloaded macro doesn't work. This
-   shouldn't be too hard to fix.
-
    Please send other bug reports and feature requests to the author.
 
 ** Acknowledgements
    Thanks to John Wiegley for fixing a bug with the face definitions
    under Emacs 24.
+
+** Changelog
+   - v0.3, 2012-10-30: print dotted lists correctly. autoload
+     definitions.
 
 #+OPTIONS: author:nil email:nil toc:nil timestamp:nil
