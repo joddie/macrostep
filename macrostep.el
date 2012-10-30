@@ -158,6 +158,8 @@
 
 ;; We use `pp-buffer' to pretty-print macro expansions
 (require 'pp)
+(require 'ring)
+(eval-when-compile (require 'cl))
 
 
 ;;; Constants and dynamically bound variables
@@ -394,18 +396,29 @@ If no more macro expansions are visible after this, exit
 	  (eq (car form) 'lambda)) 	; hack
       nil
     (condition-case err
-	(let ((macro (symbol-function (car form))))
-	  (and (consp macro)
-	       (eq (car macro) 'macro)))
+        (let ((fun (symbol-function (car form))))
+          (and (consp fun)
+               (or (eq (car fun) 'macro)
+                   (and
+                    (eq (car fun) 'autoload)
+                    (eq (nth 4 fun) 'macro)))))
       (error nil))))
 
 (defun macrostep-macro-definition (form)
   "Return, as a function, the macro definition to apply in expanding FORM."
-  (cdr (symbol-function (car form))))
-	   
+  (let ((fun (symbol-function (car form))))
+    (if (consp fun)
+        (case (car fun)
+          ((macro)
+           (cdr fun))
+
+          ((autoload)
+           (load-library (nth 1 fun))
+           (macrostep-macro-definition form)))
+      (error "(%s ...) is not a macro form" form))))
+
 (defun macrostep-expand-1 (form)
   "Return result of macro-expanding the top level of FORM by exactly one step.
-
 Unlike `macroexpand', this function does not continue macro
 expansion until a non-macro-call results."
   (if (not (macrostep-macro-form-p form)) form
