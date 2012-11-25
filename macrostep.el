@@ -409,7 +409,7 @@ If no more macro expansions are visible after this, exit
 	  (eq (car form) 'lambda)) 	; hack
       nil
     (condition-case err
-        (let ((fun (symbol-function (car form))))
+        (let ((fun (indirect-function (car form))))
           (and (consp fun)
                (or (eq (car fun) 'macro)
                    (and
@@ -419,7 +419,7 @@ If no more macro expansions are visible after this, exit
 
 (defun macrostep-macro-definition (form)
   "Return, as a function, the macro definition to apply in expanding FORM."
-  (let ((fun (symbol-function (car form))))
+  (let ((fun (indirect-function (car form))))
     (if (consp fun)
         (case (car fun)
           ((macro)
