@@ -127,6 +127,8 @@
    under Emacs 24.
 
 ** Changelog
+   - v0.4, 2013-04-07: only enter macrostep-mode on successful
+     macro-expansion
    - v0.3, 2012-10-30: print dotted lists correctly. autoload
      definitions.
 

@@ -163,6 +163,8 @@
 ;;
 ;; 1.6 Changelog 
 ;; ==============
+;;    - v0.4, 2013-04-07: only enter macrostep-mode on successful
+;;      macro-expansion
 ;;    - v0.3, 2012-10-30: print dotted lists correctly. autoload
 ;;      definitions.
 ;;
@@ -192,7 +194,7 @@
 ;;; Faces
 (defgroup macrostep nil
   "Interactive macro stepper for Emacs Lisp."
-  :version 0.1
+  :version 0.4
   :group 'lisp
   :link '(emacs-commentary-link :tag "commentary" "macrostep.el")
   :link '(emacs-library-link :tag "lisp file" "macrostep.el")
@@ -316,13 +318,14 @@ buffer and expand the next macro form found, if any."
 	 (if (consp sexp)
 	     (error "(%s ...) is not a macro form" (car sexp))
 	   (error "Text at point is not a macro form.")))))
-    (unless macrostep-mode (macrostep-mode t))
-    (let* ((buffer-read-only nil)
+    
+    (let* ((inhibit-read-only t)
 	   (expansion (macrostep-expand-1 sexp))
 	   (existing-ol (macrostep-overlay-at-point))
 	   (macrostep-gensym-depth macrostep-gensym-depth)
 	   (macrostep-gensyms-this-level nil)
 	   text priority)
+      (unless macrostep-mode (macrostep-mode t))
       (if existing-ol			; expanding an expansion
 	  (setq text sexp
 		priority (1+ (overlay-get existing-ol 'priority))
