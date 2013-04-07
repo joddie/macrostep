@@ -194,7 +194,6 @@
 ;;; Faces
 (defgroup macrostep nil
   "Interactive macro stepper for Emacs Lisp."
-  :version 0.4
   :group 'lisp
   :link '(emacs-commentary-link :tag "commentary" "macrostep.el")
   :link '(emacs-library-link :tag "lisp file" "macrostep.el")
