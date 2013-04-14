@@ -234,11 +234,6 @@
   "Face for gensyms created in the fifth level of macro expansion."
   :group 'macrostep)
 
-(defface macrostep-expansion-highlight-face
-  '((t :background "#eee8d5"))
-  "Face for macro-expansion highlight."
-  :group 'macrostep)
-
 (defface macrostep-macro-face
   '((t :underline t))
   "Face for macros in macro-expanded code."
@@ -350,7 +345,7 @@ buffer and expand the next macro form found, if any."
           (when (= (char-after (overlay-end new-ol)) ?\n)
            (move-overlay new-ol
                          (overlay-start new-ol) (+ (overlay-end new-ol) 1)))
-          (overlay-put new-ol 'face 'macrostep-expansion-highlight-face)
+          (overlay-put new-ol 'face 'highlight)
 	  (overlay-put new-ol 'evaporate t)
 	  (overlay-put new-ol 'priority priority)
 	  (overlay-put new-ol 'macrostep-original-text text)
