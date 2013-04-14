@@ -341,6 +341,11 @@ buffer and expand the next macro form found, if any."
 	(let ((new-ol
 	       (make-overlay (point)
 			     (scan-sexps (point) 1))))
+          ;; move overlay over newline to make it prettier
+          (when (eq (char-after (overlay-end new-ol)) ?\n)
+           (move-overlay new-ol
+                         (overlay-start new-ol) (+ (overlay-end new-ol) 1)))
+          (overlay-put new-ol 'face 'highlight)
 	  (overlay-put new-ol 'evaporate t)
 	  (overlay-put new-ol 'priority priority)
 	  (overlay-put new-ol 'macrostep-original-text text)
