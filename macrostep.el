@@ -190,6 +190,13 @@
   "t if gensyms have been encountered during current level of macro expansion.")
 (make-variable-buffer-local 'macrostep-gensyms-this-level)
 
+(defvar macrostep-saved-undo-list nil
+  "Saved value of buffer-undo-list upon entering macrostep mode.")
+(make-variable-buffer-local 'macrostep-saved-undo-list)
+
+(defvar macrostep-saved-read-only nil
+  "Saved value of buffer-read-only upon entering macrostep mode.")
+(make-variable-buffer-local 'macrostep-saved-read-only)
 
 ;;; Faces
 (defgroup macrostep nil
@@ -293,14 +300,34 @@ quit and return to normal editing.
   nil " Macro-Stepper"
   :keymap macrostep-keymap
   :group macrostep
-  (setq buffer-read-only macrostep-mode)
   (if macrostep-mode
-      (message
-       (substitute-command-keys
-        "\\<macrostep-keymap>Entering macro stepper mode. Use \\[macrostep-expand] to expand, \\[macrostep-collapse] to collapse, \\[macrostep-collapse-all] to exit."))
+      (progn
+        ;; Disable recording of undo information
+        (setq macrostep-saved-undo-list buffer-undo-list
+              buffer-undo-list t)
+        ;; Remember whether buffer was read-only
+        (setq macrostep-saved-read-only buffer-read-only
+              buffer-read-only t)
+        ;; Set up post-command hook to bail out on leaving read-only
+        (add-hook 'post-command-hook 'macrostep-command-hook nil t)
+        (message
+         (substitute-command-keys
+          "\\<macrostep-keymap>Entering macro stepper mode. Use \\[macrostep-expand] to expand, \\[macrostep-collapse] to collapse, \\[macrostep-collapse-all] to exit.")))
 
     ;; Exiting mode: collapse any remaining overlays
-    (when macrostep-overlays (macrostep-collapse-all))))
+    (when macrostep-overlays (macrostep-collapse-all))
+    :; Restore undo info & read-only state
+    (setq buffer-undo-list macrostep-saved-undo-list
+          buffer-read-only macrostep-saved-read-only
+          macrostep-saved-undo-list nil)
+    ;; Remove our post-command hook
+    (remove-hook 'post-command-hook 'macrostep-command-hook t)))
+
+;; Post-command hook: bail out of macrostep-mode if the user types C-x
+;; C-q to make the buffer writable again.
+(defun macrostep-command-hook ()
+  (if (not buffer-read-only)
+      (macrostep-mode 0)))
 
 
 ;;; Interactive functions
@@ -342,21 +369,22 @@ buffer and expand the next macro form found, if any."
 	      priority 1
 	      macrostep-gensym-depth -1))
 
-      (atomic-change-group
-	(macrostep-replace-sexp-at-point expansion)
-	(let ((new-ol
-	       (make-overlay (point)
-			     (scan-sexps (point) 1))))
-          ;; move overlay over newline to make it prettier
-          (when (equal (char-after (overlay-end new-ol)) ?\n)
-            (move-overlay new-ol
-                          (overlay-start new-ol) (+ (overlay-end new-ol) 1)))
-          (overlay-put new-ol 'face 'macrostep-expansion-highlight-face)
-	  (overlay-put new-ol 'evaporate t)
-	  (overlay-put new-ol 'priority priority)
-	  (overlay-put new-ol 'macrostep-original-text text)
-	  (overlay-put new-ol 'macrostep-gensym-depth macrostep-gensym-depth)
-	  (push new-ol macrostep-overlays))))))
+      (with-silent-modifications
+        (atomic-change-group
+          (macrostep-replace-sexp-at-point expansion)
+          (let ((new-ol
+                 (make-overlay (point)
+                               (scan-sexps (point) 1))))
+            ;; move overlay over newline to make it prettier
+            (when (equal (char-after (overlay-end new-ol)) ?\n)
+              (move-overlay new-ol
+                            (overlay-start new-ol) (+ (overlay-end new-ol) 1)))
+            (overlay-put new-ol 'face 'macrostep-expansion-highlight-face)
+            (overlay-put new-ol 'evaporate t)
+            (overlay-put new-ol 'priority priority)
+            (overlay-put new-ol 'macrostep-original-text text)
+            (overlay-put new-ol 'macrostep-gensym-depth macrostep-gensym-depth)
+            (push new-ol macrostep-overlays)))))))
 
 (defun macrostep-collapse ()
   "Collapse the innermost macro expansion near point to its source text.
@@ -367,8 +395,9 @@ If no more macro expansions are visible after this, exit
   (let ((overlay (macrostep-overlay-at-point)))
     (when (not overlay) (error "No macro expansion at point"))
     (let ((buffer-read-only nil))
-      (atomic-change-group
-	(macrostep-collapse-overlay overlay))))
+      (with-silent-modifications
+        (atomic-change-group
+          (macrostep-collapse-overlay overlay)))))
   (if (not macrostep-overlays)
       (macrostep-mode 0)))
 
@@ -376,11 +405,12 @@ If no more macro expansions are visible after this, exit
   "Collapse all visible macro expansions and exit `macrostep-mode'."
   (interactive)
   (let ((buffer-read-only nil))
-    (dolist (overlay macrostep-overlays)
-      (let ((outermost (= (overlay-get overlay 'priority) 1)))
-        ;; We only need restore the original text for the outermost
-        ;; overlays
-        (macrostep-collapse-overlay overlay (not outermost)))))
+    (with-silent-modifications
+      (dolist (overlay macrostep-overlays)
+        (let ((outermost (= (overlay-get overlay 'priority) 1)))
+          ;; We only need restore the original text for the outermost
+          ;; overlays
+          (macrostep-collapse-overlay overlay (not outermost))))))
   (setq macrostep-overlays nil)
   (macrostep-mode 0))
 
