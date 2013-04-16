@@ -200,42 +200,43 @@
   :link '(url-link :tag "web page" "https://github.com/joddie/macrostep"))
 
 (defface macrostep-gensym-1
-  '((((min-colors 16581375)) :background "#b0c4de")
+  '((((min-colors 16581375)) :foreground "#8080c0" :box t :bold t)
     (((min-colors 8)) :background "cyan")
     (t :inverse-video t))
   "Face for gensyms created in the first level of macro expansion."
   :group 'macrostep)
 
 (defface macrostep-gensym-2
-  '((((min-colors 16581375)) :background "#8fbc8f")
+  '((((min-colors 16581375)) :foreground "#8fbc8f" :box t :bold t)
     (((min-colors 8)) :background "#00cd00")
     (t :inverse-video t))
   "Face for gensyms created in the second level of macro expansion."
   :group 'macrostep)
 
 (defface macrostep-gensym-3
-  '((((min-colors 16581375)) :background "#daa520")
+  '((((min-colors 16581375)) :foreground "#daa520" :box t :bold t)
     (((min-colors 8)) :background "yellow")
     (t :inverse-video t))
   "Face for gensyms created in the third level of macro expansion."
   :group 'macrostep)
 
 (defface macrostep-gensym-4
-  '((((min-colors 16581375)) :background "#cd5c5c")
+  '((((min-colors 16581375)) :foreground "#cd5c5c" :box t :bold t)
     (((min-colors 8)) :background "red")
     (t :inverse-video t))
   "Face for gensyms created in the fourth level of macro expansion."
   :group 'macrostep)
 
 (defface macrostep-gensym-5
-  '((((min-colors 16581375)) :background "#da70d6")
+  '((((min-colors 16581375)) :foreground "#da70d6" :box t :bold t)
     (((min-colors 8)) :background "magenta")
     (t :inverse-video t))
   "Face for gensyms created in the fifth level of macro expansion."
   :group 'macrostep)
 
 (defface macrostep-expansion-highlight-face
-  '((t :background "#eee8d5"))
+  '((((min-colors 16581375) (background light)) :background "#eee8d5")
+    (((min-colors 16581375) (background dark)) :background "#222222"))
   "Face for macro-expansion highlight."
   :group 'macrostep)
 
@@ -347,9 +348,9 @@ buffer and expand the next macro form found, if any."
 	       (make-overlay (point)
 			     (scan-sexps (point) 1))))
           ;; move overlay over newline to make it prettier
-          (when (= (char-after (overlay-end new-ol)) ?\n)
-           (move-overlay new-ol
-                         (overlay-start new-ol) (+ (overlay-end new-ol) 1)))
+          (when (equal (char-after (overlay-end new-ol)) ?\n)
+            (move-overlay new-ol
+                          (overlay-start new-ol) (+ (overlay-end new-ol) 1)))
           (overlay-put new-ol 'face 'macrostep-expansion-highlight-face)
 	  (overlay-put new-ol 'evaporate t)
 	  (overlay-put new-ol 'priority priority)
