@@ -501,8 +501,11 @@ so that they can be colored consistently. See also
 `macrostep-print-sexp'.
 
 Also moves point to the beginning of the returned s-expression."
-  (if (not (looking-at "("))
+  (if (and (not (looking-at "("))
+           (not (looking-at "`")))
       (backward-up-list 1))
+  (if (equal (char-before) ?`)
+      (backward-char))
   (or (get-text-property (point) 'macrostep-expanded-text)
       (progn
 	;; use scan-sexps for the side-effect of producing an error
@@ -594,14 +597,16 @@ fontified using the same face (modulo the number of faces; see
 	  (put symbol 'macrostep-gensym-face face)
 	  face))))
 
-(defun macrostep-print-sexp (sexp)
+(defun macrostep-print-sexp (sexp &optional no-macro-show)
   "Pretty-print SEXP, a macro expansion, in the current buffer.
 
 Fontifies uninterned symbols and macro forms using
 `font-lock-face' property, and saves the actual text of SEXP's
 sub-forms as the `macrostep-expanded-text' text property so that
 any uninterned symbols can be reused in macro expansions of the
-sub-forms. See also `macrostep-sexp-at-point'."
+sub-forms.  If NO-MACRO-SHOW is non-nil then any macros in the
+expansion will not be fontified.  See also
+`macrostep-sexp-at-point'."
   (cond
    ((symbolp sexp)
     (let ((p (point)))
@@ -618,16 +623,24 @@ sub-forms. See also `macrostep-sexp-at-point'."
       (cond ((and (eq head 'quote)	; quote
 		  (= (length sexp) 2))
 	     (insert "'")
-	     (macrostep-print-sexp (cadr sexp)))
+	     (macrostep-print-sexp (cadr sexp) t))
 
-	    ((and (memq head '(\` \, \,@)) ; quasiquote, unquote etc.
+	    ((and (memq head '(\, \,@)) ; unquote
 		  (= (length sexp) 2))
 	     (princ head (current-buffer))
 	     (macrostep-print-sexp (cadr sexp)))
-
+            ((and (eq head '\`)
+                  (= (length sexp) 2))
+             (insert "`")               ; backquote
+             (put-text-property
+              (1- (point)) (point) 'macrostep-expanded-text sexp)
+             (put-text-property
+              (1- (point)) (point) 'font-lock-face 'macrostep-macro-face)
+             (macrostep-print-sexp (cadr sexp) t))
 	    (t				; other list form
 	     (insert "(")
-	     (when (macrostep-macro-form-p sexp)
+	     (when (and (not no-macro-show)
+                        (macrostep-macro-form-p sexp))
 	       (let ((p (point)))
 		 ;; save the real expansion as a text property on the
 		 ;; opening paren
