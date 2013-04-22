@@ -123,10 +123,14 @@
    Please send other bug reports and feature requests to the author.
 
 ** Acknowledgements
-   Thanks to John Wiegley for fixing a bug with the face definitions
-   under Emacs 24.
+   Thanks to:
+   - John Wiegley for fixing a bug with the face definitions under
+     Emacs 24 & for plugging macrostep in his [[http://www.youtube.com/watch?v%3DRvPFZL6NJNQ][EmacsConf presentation]]!
+   - George Kettleborough for bug reports and patch to highlight the
+     expanded region
 
 ** Changelog
+   - v0.5, 2013-04-16: highlight region, maintain cleaner buffer state
    - v0.4, 2013-04-07: only enter macrostep-mode on successful
      macro-expansion
    - v0.3, 2012-10-30: print dotted lists correctly. autoload

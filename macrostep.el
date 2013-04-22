@@ -5,8 +5,8 @@
 ;; Author:     joddie <j.j.oddie@gmail.com>
 ;; Maintainer: joddie <j.j.oddie@gmail.com>
 ;; Created:    16 January 2012
-;; Updated:    23 September 2012
-;; Version:    0.3
+;; Updated:    22 April 2013
+;; Version:    0.5
 ;; Keywords:   lisp, languages, macro, debugging
 ;; Url:        https://github.com/joddie/macrostep
 
@@ -158,8 +158,13 @@
 ;;
 ;; 1.5 Acknowledgements 
 ;; =====================
-;;    Thanks to John Wiegley for fixing a bug with the face definitions
-;;    under Emacs 24.
+;; Thanks to:
+;; - John Wiegley for fixing a bug with the face definitions under
+;;   Emacs 24 & for plugging macrostep in his [EmacsConf presentation]!
+;; - George Kettleborough for bug reports and patch to highlight the
+;;   expanded region
+;;
+;;   [EmacsConf presentation]: http://www.youtube.com/watch?v%3DRvPFZL6NJNQ
 ;;
 ;; 1.6 Changelog 
 ;; ==============
