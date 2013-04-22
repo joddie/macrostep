@@ -618,7 +618,7 @@ expansion will not be fontified.  See also
       (cond ((and (eq head 'quote)	; quote
 		  (= (length sexp) 2))
 	     (insert "'")
-	     (macrostep-print-sexp (cadr sexp)))
+	     (macrostep-print-sexp (cadr sexp) t))
 
 	    ((and (memq head '(\, \,@)) ; unquote
 		  (= (length sexp) 2))
