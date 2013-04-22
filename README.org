@@ -125,7 +125,7 @@
 ** Acknowledgements
    Thanks to:
    - John Wiegley for fixing a bug with the face definitions under
-     Emacs 24 & for plugging macrostep in his [[http://www.youtube.com/watch?v%3DRvPFZL6NJNQ][EmacsConf presentation]]!
+     Emacs 24 & for plugging macrostep in his [[http://youtu.be/RvPFZL6NJNQ][EmacsConf presentation]]!
    - George Kettleborough for bug reports and patch to highlight the
      expanded region
 

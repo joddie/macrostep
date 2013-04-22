@@ -164,7 +164,7 @@
 ;; - George Kettleborough for bug reports and patch to highlight the
 ;;   expanded region
 ;;
-;;   [EmacsConf presentation]: http://www.youtube.com/watch?v%3DRvPFZL6NJNQ
+;;   [EmacsConf presentation]: http://youtu.be/RvPFZL6NJNQ
 ;;
 ;; 1.6 Changelog 
 ;; ==============
