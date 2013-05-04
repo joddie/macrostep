@@ -37,10 +37,7 @@
     =emacs-lisp-mode-map=, for example C-c e:
 
 #+BEGIN_SRC emacs-lisp
-  (add-hook
-   'emacs-lisp-mode-hook
-   (lambda ()
-     (define-key emacs-lisp-mode-map (kbd "C-c e") 'macrostep-expand)))
+  (define-key emacs-lisp-mode-map (kbd "C-c e") 'macrostep-expand)
 #+END_SRC
 
     You can then enter macrostep-mode and expand a macro form
@@ -126,10 +123,11 @@
    Thanks to:
    - John Wiegley for fixing a bug with the face definitions under
      Emacs 24 & for plugging macrostep in his [[http://youtu.be/RvPFZL6NJNQ][EmacsConf presentation]]!
-   - George Kettleborough for bug reports and patch to highlight the
-     expanded region
+   - George Kettleborough for bug reports, and patches to highlight
+     the expanded region and properly handle backquotes.
 
 ** Changelog
+   - v0.6, 2013-05-94: better handling of quote and backquote
    - v0.5, 2013-04-16: highlight region, maintain cleaner buffer state
    - v0.4, 2013-04-07: only enter macrostep-mode on successful
      macro-expansion
