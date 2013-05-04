@@ -5,8 +5,8 @@
 ;; Author:     joddie <j.j.oddie@gmail.com>
 ;; Maintainer: joddie <j.j.oddie@gmail.com>
 ;; Created:    16 January 2012
-;; Updated:    22 April 2013
-;; Version:    0.5
+;; Updated:    04 May 2013
+;; Version:    0.6
 ;; Keywords:   lisp, languages, macro, debugging
 ;; Url:        https://github.com/joddie/macrostep
 
