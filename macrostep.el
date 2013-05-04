@@ -501,8 +501,7 @@ so that they can be colored consistently. See also
 `macrostep-print-sexp'.
 
 Also moves point to the beginning of the returned s-expression."
-  (if (and (not (looking-at "("))
-           (not (looking-at "`")))
+  (if (not (looking-at "[(`]"))
       (backward-up-list 1))
   (if (equal (char-before) ?`)
       (backward-char))
@@ -597,25 +596,37 @@ fontified using the same face (modulo the number of faces; see
 	  (put symbol 'macrostep-gensym-face face)
 	  face))))
 
-(defun macrostep-print-sexp (sexp &optional no-macro-show)
+(defmacro macrostep-propertize (form &rest plist)
+  "Evaluate FORM, applying syntax properties in PLIST to any inserted text."
+  (declare (indent 1)
+           (debug (&rest form)))
+  (let ((start (make-symbol "start")))
+    `(let ((,start (point)))
+       (prog1
+           ,form
+         ,@(loop for (key value) on plist by #'cddr
+                 collect `(put-text-property ,start (point)
+                                             ,key ,value))))))
+
+(defun macrostep-print-sexp (sexp &optional quoted-form-p)
   "Pretty-print SEXP, a macro expansion, in the current buffer.
 
 Fontifies uninterned symbols and macro forms using
 `font-lock-face' property, and saves the actual text of SEXP's
 sub-forms as the `macrostep-expanded-text' text property so that
 any uninterned symbols can be reused in macro expansions of the
-sub-forms.  If NO-MACRO-SHOW is non-nil then any macros in the
+sub-forms.  If QUOTED-FORM-P is non-nil then any macros in the
 expansion will not be fontified.  See also
 `macrostep-sexp-at-point'."
   (cond
    ((symbolp sexp)
-    (let ((p (point)))
-      (prin1 sexp (current-buffer))
-      ;; fontify gensyms
-      (when (not (eq sexp (intern-soft (symbol-name sexp))))
-	(put-text-property p (point)
-			   'font-lock-face
-			   (macrostep-get-gensym-face sexp)))))
+    ;; Fontify gensyms
+    (if (not (eq sexp (intern-soft (symbol-name sexp))))
+        (macrostep-propertize
+            (prin1 sexp (current-buffer))
+          'font-lock-face (macrostep-get-gensym-face sexp))
+      ;; Print other symbols as normal
+      (prin1 sexp (current-buffer))))
 
    ((listp sexp)
     ;; Print quoted and quasiquoted forms nicely.
@@ -625,38 +636,44 @@ expansion will not be fontified.  See also
 	     (insert "'")
 	     (macrostep-print-sexp (cadr sexp) t))
 
+            ((and (eq head '\`)         ; backquote
+                  (= (length sexp) 2))
+             ;; Treat backquote as a macro
+             (macrostep-propertize
+                 (insert "`")
+               'macrostep-expanded-text sexp
+               'font-lock-face 'macrostep-macro-face)
+             (macrostep-print-sexp (cadr sexp) t))
+
 	    ((and (memq head '(\, \,@)) ; unquote
 		  (= (length sexp) 2))
 	     (princ head (current-buffer))
 	     (macrostep-print-sexp (cadr sexp)))
-            ((and (eq head '\`)
-                  (= (length sexp) 2))
-             (insert "`")               ; backquote
-             (put-text-property
-              (1- (point)) (point) 'macrostep-expanded-text sexp)
-             (put-text-property
-              (1- (point)) (point) 'font-lock-face 'macrostep-macro-face)
-             (macrostep-print-sexp (cadr sexp) t))
+
 	    (t				; other list form
-	     (insert "(")
-	     (when (and (not no-macro-show)
-                        (macrostep-macro-form-p sexp))
-	       (let ((p (point)))
-		 ;; save the real expansion as a text property on the
-		 ;; opening paren
-		 (put-text-property
-		  (1- p) p 'macrostep-expanded-text sexp)	       
-		 ;; fontify the head of the macro
-		 (prin1 head (current-buffer))
-		 (put-text-property
-		  p (point) 'font-lock-face 'macrostep-macro-face))
-	       (insert " ")
-	       (setq sexp (cdr sexp)))
-	     ;; print remaining list elements
+             ;; Is it an (unquoted) macro form?
+	     (if (and (not quoted-form-p)
+                      (macrostep-macro-form-p sexp))
+                 (progn
+                   ;; Save the real expansion as a text property on the
+                   ;; opening paren
+                   (macrostep-propertize
+                       (insert "(")
+                     'macrostep-expanded-text sexp)
+                   ;; Fontify the head of the macro
+                   (macrostep-propertize
+                       (prin1 head (current-buffer))
+                     'font-lock-face 'macrostep-macro-face)
+                   (when (cdr sexp) (insert " "))
+                   (setq sexp (cdr sexp)))
+               ;; Not a macro form
+               (insert "("))
+
+	     ;; Print remaining list elements
              (while sexp
                (if (listp sexp)
                    (progn
-                     (macrostep-print-sexp (car sexp))
+                     (macrostep-print-sexp (car sexp) quoted-form-p)
                      (when (cdr sexp) (insert " "))
                      (setq sexp (cdr sexp)))
                  ;; Print tail of dotted list
@@ -665,7 +682,7 @@ expansion will not be fontified.  See also
                  (setq sexp nil)))
 	     (insert ")")))))
 
-   ;; print non-lists as normal
+   ;; Print everything except symbols and lists as normal
    (t (prin1 sexp (current-buffer)))))
 
 
