@@ -167,7 +167,7 @@
 ;; 6 Changelog
 ;; ===========
 ;;
-;;   - v0.6, 2013-05-94: better handling of quote and backquote
+;;   - v0.6, 2013-05-04: better handling of quote and backquote
 ;;   - v0.5, 2013-04-16: highlight region, maintain cleaner buffer state
 ;;   - v0.4, 2013-04-07: only enter macrostep-mode on successful
 ;;     macro-expansion
@@ -321,7 +321,7 @@ quit and return to normal editing.
 
     ;; Exiting mode: collapse any remaining overlays
     (when macrostep-overlays (macrostep-collapse-all))
-    :; Restore undo info & read-only state
+    ;; Restore undo info & read-only state
     (setq buffer-undo-list macrostep-saved-undo-list
           buffer-read-only macrostep-saved-read-only
           macrostep-saved-undo-list nil)

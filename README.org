@@ -127,7 +127,7 @@
      the expanded region and properly handle backquotes.
 
 ** Changelog
-   - v0.6, 2013-05-94: better handling of quote and backquote
+   - v0.6, 2013-05-04: better handling of quote and backquote
    - v0.5, 2013-04-16: highlight region, maintain cleaner buffer state
    - v0.4, 2013-04-07: only enter macrostep-mode on successful
      macro-expansion
