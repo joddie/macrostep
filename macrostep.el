@@ -179,7 +179,9 @@
 ;; We use `pp-buffer' to pretty-print macro expansions
 (require 'pp)
 (require 'ring)
-(eval-when-compile (require 'cl))
+(eval-when-compile
+  (require 'cl)
+  (require 'pcase))
 
 
 ;;; Constants and dynamically bound variables
@@ -202,6 +204,10 @@
 (defvar macrostep-saved-read-only nil
   "Saved value of buffer-read-only upon entering macrostep mode.")
 (make-variable-buffer-local 'macrostep-saved-read-only)
+
+(defvar macrostep-environment nil
+  "Local macro-expansion environment, including macros declared by `cl-macrolet'.")
+(make-variable-buffer-local 'macrostep-environment)
 
 ;;; Faces
 (defgroup macrostep nil
@@ -345,7 +351,8 @@ buffer temporarily read-only. If macrostep-mode is active and the
 form following point is not a macro form, search forward in the
 buffer and expand the next macro form found, if any."
   (interactive)
-  (let ((sexp (macrostep-sexp-at-point)))
+  (let ((sexp (macrostep-sexp-at-point))
+        (macrostep-environment (macrostep-environment-at-point)))
     (when (not (macrostep-macro-form-p sexp))
       (condition-case nil
 	  (progn
@@ -457,26 +464,34 @@ If no more macro expansions are visible after this, exit
 	  (eq (car form) 'lambda)) 	; hack
       nil
     (condition-case err
-        (let ((fun (indirect-function (car form))))
-          (and (consp fun)
-               (or (eq (car fun) 'macro)
-                   (and
-                    (eq (car fun) 'autoload)
-                    (eq (nth 4 fun) 'macro)))))
+        (or
+         ;; Locally bound as a macro?
+         (assq (car form) macrostep-environment)
+         ;; Globally defined?
+         (let ((fun (indirect-function (car form))))
+           (and (consp fun)
+                (or (eq (car fun) 'macro)
+                    (and
+                     (eq (car fun) 'autoload)
+                     (eq (nth 4 fun) 'macro))))))
       (error nil))))
 
 (defun macrostep-macro-definition (form)
   "Return, as a function, the macro definition to apply in expanding FORM."
-  (let ((fun (indirect-function (car form))))
-    (if (consp fun)
-        (case (car fun)
-          ((macro)
-           (cdr fun))
+  (or
+   ;; Locally bound by `macrolet'
+   (cdr (assq (car form) macrostep-environment))
+   ;; Globally defined
+   (let ((fun (indirect-function (car form))))
+     (if (consp fun)
+         (case (car fun)
+           ((macro)
+            (cdr fun))
 
-          ((autoload)
-           (load-library (nth 1 fun))
-           (macrostep-macro-definition form)))
-      (error "(%s ...) is not a macro form" form))))
+           ((autoload)
+            (load-library (nth 1 fun))
+            (macrostep-macro-definition form)))
+       (error "(%s ...) is not a macro form" form)))))
 
 (defun macrostep-expand-1 (form)
   "Return result of macro-expanding the top level of FORM by exactly one step.
@@ -484,6 +499,47 @@ Unlike `macroexpand', this function does not continue macro
 expansion until a non-macro-call results."
   (if (not (macrostep-macro-form-p form)) form
     (apply (macrostep-macro-definition form) (cdr form))))
+
+(defun macrostep-environment-at-point ()
+  "Return the local macro-expansion environment at point, if any.
+
+The local environment includes macros declared by any `macrolet'
+or `cl-macrolet' forms surrounding point.
+
+The return value is an alist of elements (NAME . FUNCTION), where
+NAME is the symbol locally bound to the macro and FUNCTION is the
+lambda expression that returns its expansion."
+  (save-excursion
+    (let
+        ((enclosing-form
+          (ignore-errors
+            (backward-up-list)
+            (read (copy-marker (point))))))
+      (pcase enclosing-form
+        (`(,(or `macrolet `cl-macrolet) ,bindings . ,_)
+          (let ((binding-environment
+                 (macrostep-bindings-to-environment bindings))
+                (enclosing-environment
+                 (macrostep-environment-at-point)))
+            (append enclosing-environment binding-environment)))
+        (`nil nil)
+        (_ (macrostep-environment-at-point))))))
+
+(defun macrostep-bindings-to-environment (bindings)
+  "Return the macro-expansion environment declared by BINDINGS as an alist.
+
+BINDINGS is a list in the form expected by `macrolet' or
+`cl-macrolet'.  The return value is an alist, as described in
+`macrostep-environment-at-point'."
+  ;; So that the later elements of bindings properly shadow the
+  ;; earlier ones in the returned environment, we must reverse the
+  ;; list before mapping over it.
+  (cl-loop for (name . forms) in (reverse bindings)
+           collect
+           ;; Adapted from the definition of `cl-macrolet':
+           (let ((res (cl--transform-lambda forms name)))
+             (eval (car res))
+             (cons name `(lambda ,@(cdr res))))))
 
 (defun macrostep-overlay-at-point ()
   "Return the innermost macro stepper overlay at point."
