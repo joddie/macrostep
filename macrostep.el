@@ -1,11 +1,11 @@
 ;;; macrostep.el --- interactive macro stepper for Emacs Lisp
 
-;; Copyright (C) 2012 Jonathan Oddie <j.j.oddie@gmail.com>
+;; Copyright (C) 2012-2014 Jonathan Oddie <j.j.oddie@gmail.com>
 
 ;; Author:     joddie <j.j.oddie@gmail.com>
 ;; Maintainer: joddie <j.j.oddie@gmail.com>
 ;; Created:    16 January 2012
-;; Updated:    04 May 2013
+;; Updated:    05 May 2014
 ;; Version:    0.6
 ;; Keywords:   lisp, languages, macro, debugging
 ;; Url:        https://github.com/joddie/macrostep
