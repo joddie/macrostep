@@ -179,6 +179,8 @@
 ;; We use `pp-buffer' to pretty-print macro expansions
 (require 'pp)
 (require 'ring)
+;; `cl-macs' is needed at run-time to support `cl-macrolet'
+(require 'cl-macs)
 (eval-when-compile
   (require 'cl)
   (require 'pcase))
