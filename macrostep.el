@@ -523,7 +523,7 @@ lambda expression that returns its expansion."
                  (macrostep-bindings-to-environment bindings))
                 (enclosing-environment
                  (macrostep-environment-at-point)))
-            (append enclosing-environment binding-environment)))
+            (append binding-environment enclosing-environment)))
         (`nil nil)
         (_ (macrostep-environment-at-point))))))
 
