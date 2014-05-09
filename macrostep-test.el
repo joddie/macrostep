@@ -161,7 +161,64 @@
         (apply (cdr (assq 'get env)) '(:begin))
         '(plist-get list :begin))))))
 
+(ert-deftest macrostep-print-sexp ()
+  (cl-macrolet ((should-print (form string)
+                  `(should (equal
+                            (with-temp-buffer
+                              (macrostep-print-sexp ,form)
+                              (buffer-string))
+                            ,string))))
+    (should-print 'symbol "symbol")
+    (should-print '(single-element-list) "(single-element-list)")
+    (should-print '(two-element list) "(two-element list)")
+    (should-print '(three element list) "(three element list)")
+    (should-print '(dotted . list) "(dotted . list)")
+    (should-print '(four element dotted . list) "(four element dotted . list)")
+    (should-print '(nested (list (elements))) "(nested (list (elements)))")
+    (should-print '((deeply (nested)) (list (elements)))
+                  "((deeply (nested)) (list (elements)))")
+    (should-print '(quote fishes) "'fishes")
+    (should-print '`(backquoted form) "`(backquoted form)")
+    (should-print '`(backquoted (form) ,with ,@splices)
+                  "`(backquoted (form) ,with ,@splices)")))
+
+(ert-deftest macrostep-print-sexp-macrolet-environment ()
+  (with-temp-buffer
+    (emacs-lisp-mode)
+    (save-excursion
+      (macrostep-print-sexp
+       '(macrolet ((some-macro (&rest forms) (cons 'progn forms)))
+         (some-macro with (arguments))
+         (intervening body forms)
+         (some-macro with (more) (arguments))))
+      (cl-flet ((search (text)
+                  (goto-char (point-min))
+                  (search-forward text)
+                  (goto-char (match-beginning 0))
+                  ;; Leave point on the head of the form
+                  (forward-char)))
+        ;; The occurrence of "(some-macro" in the binding list should
+        ;; not be fontified as a macro form
+        (search "(some-macro (&rest")
+        (should-not
+         (eq (get-char-property (point) 'font-lock-face)
+             'macrostep-macro-face))
+
+        ;; However, the two occurrences in the body of the macrolet should be.
+        (search "(some-macro with (arguments)")
+        (should
+         (eq (get-char-property (point) 'font-lock-face)
+             'macrostep-macro-face))
+
+        (search "(some-macro with (more)")
+        (should
+         (eq (get-char-property (point) 'font-lock-face)
+             'macrostep-macro-face))))))
+
+
 (when noninteractive
   (load-file (expand-file-name "macrostep.el"
                                (file-name-directory load-file-name)))
   (ert-run-tests-batch "^macrostep"))
+
+

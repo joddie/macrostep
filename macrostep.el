@@ -709,36 +709,60 @@ expansion will not be fontified.  See also
 	     (macrostep-print-sexp (cadr sexp)))
 
 	    (t				; other list form
-             ;; Is it an (unquoted) macro form?
-	     (if (and (not quoted-form-p)
-                      (macrostep-macro-form-p sexp))
-                 (progn
-                   ;; Save the real expansion as a text property on the
-                   ;; opening paren
-                   (macrostep-propertize
-                       (insert "(")
-                     'macrostep-expanded-text sexp)
-                   ;; Fontify the head of the macro
-                   (macrostep-propertize
-                       (prin1 head (current-buffer))
-                     'font-lock-face 'macrostep-macro-face)
-                   (when (cdr sexp) (insert " "))
-                   (setq sexp (cdr sexp)))
-               ;; Not a macro form
-               (insert "("))
-
-	     ;; Print remaining list elements
-             (while sexp
-               (if (listp sexp)
+             ;; If the sexp is a (cl-)macrolet form, the
+             ;; macro-expansion environment should be extended using
+             ;; its bindings while printing the body forms in order to
+             ;; correctly mark any uses of locally-bound macros. (See
+             ;; `with-js' in `js.el.gz' for an example of a macro that
+             ;; works this way).
+             (let ((extended-environment
+                    (pcase sexp
+                      (`(,(or `cl-macrolet `macrolet) ,bindings . ,_)
+                        (append (macrostep-bindings-to-environment bindings)
+                                macrostep-environment))
+                      (_ macrostep-environment))))
+               
+               ;; Is it an (unquoted) macro form?
+               (if (and (not quoted-form-p)
+                        (macrostep-macro-form-p sexp))
                    (progn
-                     (macrostep-print-sexp (car sexp) quoted-form-p)
-                     (when (cdr sexp) (insert " "))
-                     (setq sexp (cdr sexp)))
-                 ;; Print tail of dotted list
-                 (insert ". ")
-                 (macrostep-print-sexp sexp)
-                 (setq sexp nil)))
-	     (insert ")")))))
+                     ;; Save the real expansion as a text property on the
+                     ;; opening paren
+                     (macrostep-propertize
+                         (insert "(")
+                       'macrostep-expanded-text sexp)
+                     ;; Fontify the head of the macro
+                     (macrostep-propertize
+                         (prin1 head (current-buffer))
+                       'font-lock-face 'macrostep-macro-face))
+                 ;; Not a macro form
+                 (insert "(")
+                 (prin1 head (current-buffer)))
+
+               ;; Print remaining list elements
+               (setq sexp (cdr sexp))
+               (when sexp (insert " "))
+               ;; macrostep-environment will be setq'd after printing
+               ;; the second element of the list (i.e., the binding
+               ;; list in a macrolet form)
+               (let ((macrostep-environment macrostep-environment))
+                 (while sexp
+                   (if (listp sexp)
+                       (progn
+                         (macrostep-print-sexp (car sexp) quoted-form-p)
+                         (when (cdr sexp) (insert " "))
+                         (setq sexp (cdr sexp))
+                         ;; At this point the first and second
+                         ;; elements of the list have been printed, so
+                         ;; it is time to extend the macro-expansion
+                         ;; environment inside a macrolet for the body
+                         ;; forms.
+                         (setq macrostep-environment extended-environment))
+                     ;; Print tail of dotted list
+                     (insert ". ")
+                     (macrostep-print-sexp sexp)
+                     (setq sexp nil))))
+               (insert ")"))))))
 
    ;; Print everything except symbols and lists as normal
    (t (prin1 sexp (current-buffer)))))
