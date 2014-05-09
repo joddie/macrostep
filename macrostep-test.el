@@ -44,6 +44,19 @@
                       ,expansion)))
          (macrostep-collapse-all)))))
 
+(ert-deftest macrostep-expand-defmacro ()
+  (defmacro macrostep-dummy-macro (&rest args)
+    `(expansion of ,@args))
+  (macrostep-with-text
+   '(progn
+     (first body form)
+     (second body form)
+     (macrostep-dummy-macro (first (argument)) second (third argument))
+     (remaining body forms))
+   (macrostep-should-expand
+    '(macrostep-dummy-macro (first (argument)) second (third argument))
+    '(expansion of (first (argument)) second (third argument)))))
+
 (ert-deftest macrostep-expand-macrolet ()
   (macrostep-with-text
       '(macrolet
