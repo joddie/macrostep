@@ -140,6 +140,27 @@
      '(test-macro (second (call)))
      '(inner-definition (second (call))))))
 
+(ert-deftest macrostep-environnment-at-point ()
+  (macrostep-with-text
+      ;; Taken from org-notify.el.
+      '(macrolet ((get (k) `(plist-get list ,k))
+                  (pr (k v) `(setq result (plist-put result ,k ,v))))
+        (body forms))
+    (search-forward "(body")
+    (let ((env (macrostep-environment-at-point)))
+      (should (assq 'get env))
+      (should (assq 'pr env))
+      (should (functionp (cdr (assq 'get env))))
+      (should (functionp (cdr (assq 'pr env))))
+      (should
+       (equal
+        (apply (cdr (assq 'pr env)) '(:heading heading))
+        '(setq result (plist-put result :heading heading))))
+      (should
+       (equal
+        (apply (cdr (assq 'get env)) '(:begin))
+        '(plist-get list :begin))))))
+
 (when noninteractive
   (load-file (expand-file-name "macrostep.el"
                                (file-name-directory load-file-name)))
