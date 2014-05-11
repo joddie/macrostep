@@ -5,8 +5,8 @@
 ;; Author:     joddie <j.j.oddie@gmail.com>
 ;; Maintainer: joddie <j.j.oddie@gmail.com>
 ;; Created:    16 January 2012
-;; Updated:    05 May 2014
-;; Version:    0.6
+;; Updated:    11 May 2014
+;; Version:    0.7
 ;; Keywords:   lisp, languages, macro, debugging
 ;; Url:        https://github.com/joddie/macrostep
 
@@ -47,11 +47,14 @@
 ;;   macro-expanded code. The heads of macro sub-forms are fontified using
 ;;   `macrostep-macro-face'. Uninterned symbols (gensyms) are fontified
 ;;   based on which step in the expansion created them, to distinguish them
-;;   from normal symbols and from other gensyms with the same print name.
-;;   Use `customize-group' with the `macrostep' group to customize these
-;;   faces.
-;;
-;;
+;;   from normal symbols and from other gensyms with the same print
+;;   name. Use `customize-group' with the `macrostep' group to customize
+;;   these faces.
+
+;;   Both macros defined by `defmacro' and local macros created by
+;;   `macrolet' and `cl-macrolet' can be expanded.
+
+
 ;; 2 Key-bindings and usage
 ;; ========================
 ;;
@@ -159,14 +162,19 @@
 ;;     24 & for plugging macrostep in his [EmacsConf presentation]!
 ;;   - George Kettleborough for bug reports, and patches to highlight the
 ;;     expanded region and properly handle backquotes.
-;;
-;;
+;;   - Nic Ferrier for suggesting support for local definitions within
+;;     macrolet forms
+
+
 ;;   [EmacsConf presentation] http://youtu.be/RvPFZL6NJNQ
 ;;
 ;;
 ;; 6 Changelog
 ;; ===========
 ;;
+
+;;   - v0.7, 2014-05-11: expand locally-defined macros within (cl-)macrolet
+;;     forms
 ;;   - v0.6, 2013-05-04: better handling of quote and backquote
 ;;   - v0.5, 2013-04-16: highlight region, maintain cleaner buffer state
 ;;   - v0.4, 2013-04-07: only enter macrostep-mode on successful

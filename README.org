@@ -23,6 +23,9 @@
    the same print name. Use =customize-group= with the =macrostep=
    group to customize these faces.
 
+   Both macros defined by =defmacro= and local macros created by
+   =macrolet= and =cl-macrolet= can be expanded.
+
 ** Key-bindings and usage
    The standard macrostep-mode keybindings are the following:
  
@@ -125,8 +128,12 @@
      Emacs 24 & for plugging macrostep in his [[http://youtu.be/RvPFZL6NJNQ][EmacsConf presentation]]!
    - George Kettleborough for bug reports, and patches to highlight
      the expanded region and properly handle backquotes.
+   - Nic Ferrier for suggesting support for local definitions within
+     macrolet forms
 
 ** Changelog
+   - v0.7, 2014-05-11: expand locally-defined macros within
+     (cl-)macrolet forms
    - v0.6, 2013-05-04: better handling of quote and backquote
    - v0.5, 2013-04-16: highlight region, maintain cleaner buffer state
    - v0.4, 2013-04-07: only enter macrostep-mode on successful
