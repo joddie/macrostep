@@ -741,11 +741,11 @@ expansion will not be fontified.  See also
                        'macrostep-expanded-text sexp)
                      ;; Fontify the head of the macro
                      (macrostep-propertize
-                         (prin1 head (current-buffer))
+                         (macrostep-print-sexp head)
                        'font-lock-face 'macrostep-macro-face))
                  ;; Not a macro form
                  (insert "(")
-                 (prin1 head (current-buffer)))
+                 (macrostep-print-sexp head quoted-form-p))
 
                ;; Print remaining list elements
                (setq sexp (cdr sexp))
