@@ -132,6 +132,8 @@
      macrolet forms
 
 ** Changelog
+   - v0.8, 2014-05-29: fix a bug with printing the first element of
+     lists
    - v0.7, 2014-05-11: expand locally-defined macros within
      (cl-)macrolet forms
    - v0.6, 2013-05-04: better handling of quote and backquote
