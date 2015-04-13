@@ -636,17 +636,18 @@ inserted using `macrostep-print-sexp' and pretty-printed using
 	(delete-region start end)))
 	
     (unless original                   ; inserting macro expansion
-      ;; point is now before the expanded form; pretty-print it
-      (narrow-to-region (point) (scan-sexps (point) 1))
-      (save-excursion
-	(pp-buffer)
-	;; remove the extra newline that pp-buffer inserts
-	(goto-char (point-max))
-	(delete-region
-	 (point)
-	 (save-excursion (skip-chars-backward " \t\n") (point))))
-      (widen)
-      (indent-sexp))))
+      (save-restriction
+        ;; point is now before the expanded form; pretty-print it
+        (narrow-to-region (point) (scan-sexps (point) 1))
+        (save-excursion
+          (pp-buffer)
+          ;; remove the extra newline that pp-buffer inserts
+          (goto-char (point-max))
+          (delete-region
+           (point)
+           (save-excursion (skip-chars-backward " \t\n") (point))))
+        (widen)
+        (indent-sexp)))))
 
 (defun macrostep-get-gensym-face (symbol)
   "Return the face to use in fontifying SYMBOL in printed macro expansions.
