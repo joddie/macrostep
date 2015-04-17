@@ -19,7 +19,8 @@
 
 
 (defmacro macrostep-with-text (object &rest forms)
-  (declare (indent 1))
+  (declare (indent 1)
+           (debug (&rest form)))
   `(with-temp-buffer
      (emacs-lisp-mode)
      (let ((print-level nil)
@@ -215,6 +216,49 @@
          (eq (get-char-property (point) 'font-lock-face)
              'macrostep-macro-face))))))
 
+(ert-deftest macrostep-expand-in-separate-buffer ()
+  (defmacro macrostep-dummy-macro (&rest args)
+    `(expansion of ,@args))
+  (let ((macrostep-expand-in-separate-buffer t))
+    (macrostep-with-text
+        '(progn
+          (first form)
+          (second form)
+          (macrostep-dummy-macro (some (arguments)))
+          (final form))
+      (let ((original-buffer (current-buffer)))
+        (search-forward "(macrostep-dummy-macro")
+        (macrostep-expand)
+        (should (not (equal (current-buffer) original-buffer)))
+        (should macrostep-expansion-buffer)
+        (should (equal (read (copy-marker (point)))
+                       '(expansion of (some (arguments)))))))))
+
+(ert-deftest macrostep-expand-macrolet-in-separate-buffer ()
+  (let ((macrostep-expand-in-separate-buffer t))
+    (macrostep-with-text
+        '(cl-macrolet
+          ((dummy-macro-1 (&rest args)
+            `(dummy-macro-2 ,@args))
+           (dummy-macro-2 (&rest args)
+            `(expansion of ,@args)))
+          (dummy-macro-1 (some (arguments))))
+      (let ((original-buffer (current-buffer)))
+        (search-forward "(dummy-macro-1 (some")
+        (goto-char (match-beginning 0))
+        (macrostep-expand)
+        (should (not (equal (current-buffer) original-buffer)))
+        (should macrostep-expansion-buffer)
+        (should (equal (read (copy-marker (point)))
+                       '(dummy-macro-2 (some (arguments)))))
+
+        (macrostep-expand)
+        (should (equal (read (copy-marker (point)))
+                       '(expansion of (some (arguments)))))
+
+        (macrostep-collapse)
+        (should (equal (read (copy-marker (point)))
+                       '(dummy-macro-2 (some (arguments)))))))))
 
 (when noninteractive
   (load-file (expand-file-name "macrostep.el"

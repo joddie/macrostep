@@ -218,9 +218,20 @@
 
 (defvar macrostep-environment nil
   "Local macro-expansion environment, including macros declared by `cl-macrolet'.")
-(make-variable-buffer-local 'macrostep-environment)
 
-;;; Faces
+(defvar macrostep-expansion-buffer nil
+  "Non-nil if the current buffer is a macro-expansion buffer.")
+(make-variable-buffer-local 'macrostep-expansion-buffer)
+
+(defvar macrostep-outer-environment nil
+  "Outermost macro-expansion environment to use in a dedicated macro-expansion buffers.
+
+This variable is used to save information about any enclosing
+`cl-macrolet' context when a macro form is expanded in a separate
+buffer.")
+(make-variable-buffer-local 'macrostep-outer-environment)
+
+;;; Customization options and faces
 (defgroup macrostep nil
   "Interactive macro stepper for Emacs Lisp."
   :group 'lisp
@@ -273,6 +284,11 @@
   '((t :underline t))
   "Face for macros in macro-expanded code."
   :group 'macrostep)
+
+(defcustom macrostep-expand-in-separate-buffer nil
+  "When non-nil, show expansions in a separate buffer instead of inline."
+  :group 'macrostep
+  :type 'boolean)
 
 ;; Need the following for making the ring of faces
 (defun macrostep-make-ring (&rest items)
@@ -336,14 +352,18 @@ quit and return to normal editing.
          (substitute-command-keys
           "\\<macrostep-keymap>Entering macro stepper mode. Use \\[macrostep-expand] to expand, \\[macrostep-collapse] to collapse, \\[macrostep-collapse-all] to exit.")))
 
-    ;; Exiting mode: collapse any remaining overlays
-    (when macrostep-overlays (macrostep-collapse-all))
-    ;; Restore undo info & read-only state
-    (setq buffer-undo-list macrostep-saved-undo-list
-          buffer-read-only macrostep-saved-read-only
-          macrostep-saved-undo-list nil)
-    ;; Remove our post-command hook
-    (remove-hook 'post-command-hook 'macrostep-command-hook t)))
+    ;; Exiting mode
+    (if macrostep-expansion-buffer
+        ;; Kill dedicated expansion buffers
+        (quit-window t)
+      ;; Collapse any remaining overlays
+      (when macrostep-overlays (macrostep-collapse-all))
+      ;; Restore undo info & read-only state
+      (setq buffer-undo-list macrostep-saved-undo-list
+            buffer-read-only macrostep-saved-read-only
+            macrostep-saved-undo-list nil)
+      ;; Remove our post-command hook
+      (remove-hook 'post-command-hook 'macrostep-command-hook t))))
 
 ;; Post-command hook: bail out of macrostep-mode if the user types C-x
 ;; C-q to make the buffer writable again.
@@ -373,6 +393,22 @@ buffer and expand the next macro form found, if any."
 	 (if (consp sexp)
 	     (error "(%s ...) is not a macro form" (car sexp))
 	   (error "Text at point is not a macro form.")))))
+
+    ;; Create a dedicated macro-expansion buffer and copy the text to
+    ;; be expanded into it, if required
+    (when (and macrostep-expand-in-separate-buffer
+               (not macrostep-expansion-buffer))
+      (let ((buffer
+             (get-buffer-create (generate-new-buffer-name "*macro expansion*"))))
+        (set-buffer buffer)
+        (emacs-lisp-mode)
+        (setq macrostep-expansion-buffer t)
+        (setq macrostep-outer-environment macrostep-environment)
+        (save-excursion
+          (let ((print-level nil)
+                (print-length nil))
+            (print sexp (current-buffer))))
+        (pop-to-buffer buffer)))
     
     (let* ((inhibit-read-only t)
 	   (expansion (macrostep-expand-1 sexp))
@@ -398,11 +434,13 @@ buffer and expand the next macro form found, if any."
           (let ((new-ol
                  (make-overlay (point)
                                (scan-sexps (point) 1))))
-            ;; move overlay over newline to make it prettier
+            ;; Move overlay over newline to make it prettier
             (when (equal (char-after (overlay-end new-ol)) ?\n)
               (move-overlay new-ol
                             (overlay-start new-ol) (+ (overlay-end new-ol) 1)))
-            (overlay-put new-ol 'face 'macrostep-expansion-highlight-face)
+            ;; Highlight the overlay in original source buffers only
+            (unless macrostep-expansion-buffer
+              (overlay-put new-ol 'face 'macrostep-expansion-highlight-face))
             (overlay-put new-ol 'evaporate t)
             (overlay-put new-ol 'priority priority)
             (overlay-put new-ol 'macrostep-original-text text)
@@ -533,8 +571,12 @@ lambda expression that returns its expansion."
                 (enclosing-environment
                  (macrostep-environment-at-point)))
             (append binding-environment enclosing-environment)))
-        (`nil nil)
-        (_ (macrostep-environment-at-point))))))
+        (`nil
+         (if macrostep-expansion-buffer
+             macrostep-outer-environment
+           nil))
+        (_
+         (macrostep-environment-at-point))))))
 
 (defun macrostep-bindings-to-environment (bindings)
   "Return the macro-expansion environment declared by BINDINGS as an alist.
