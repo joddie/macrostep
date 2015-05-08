@@ -303,6 +303,23 @@ buffer.")
    'macrostep-gensym-4 'macrostep-gensym-5)
   "Ring of all macrostepper faces for fontifying gensyms.")
 
+;; Other modes can enable macrostep by redefining these functions to
+;; language-specific versions.
+(defvar-local macrostep-sexp-at-point-function
+    #'macrostep-sexp-at-point)
+
+(defvar-local macrostep-environment-at-point-function
+    #'macrostep-environment-at-point)
+
+(defvar-local macrostep-expand-1-function
+    #'macrostep-expand-1)
+
+(defvar-local macrostep-print-function
+    #'macrostep-pp)
+
+(defvar-local macrostep-macro-form-p-function
+    #'macrostep-macro-form-p)
+
 
 ;;; Define keymap and minor mode
 (defvar macrostep-keymap
@@ -382,17 +399,9 @@ buffer temporarily read-only. If macrostep-mode is active and the
 form following point is not a macro form, search forward in the
 buffer and expand the next macro form found, if any."
   (interactive)
-  (let ((sexp (macrostep-sexp-at-point))
-        (macrostep-environment (macrostep-environment-at-point)))
-    (when (not (macrostep-macro-form-p sexp))
-      (condition-case nil
-	  (progn
-	    (macrostep-next-macro)
-	    (setq sexp (macrostep-sexp-at-point)))
-	(error
-	 (if (consp sexp)
-	     (error "(%s ...) is not a macro form" (car sexp))
-	   (error "Text at point is not a macro form.")))))
+  (let ((sexp (macrostep--macro-form-near-point))
+        (macrostep-environment (funcall macrostep-environment-at-point-function))
+        (buffer-major-mode major-mode))
 
     ;; Create a dedicated macro-expansion buffer and copy the text to
     ;; be expanded into it, if required
@@ -401,30 +410,35 @@ buffer and expand the next macro form found, if any."
       (let ((buffer
              (get-buffer-create (generate-new-buffer-name "*macro expansion*"))))
         (set-buffer buffer)
-        (emacs-lisp-mode)
+        (funcall buffer-major-mode)
         (setq macrostep-expansion-buffer t)
         (setq macrostep-outer-environment macrostep-environment)
         (save-excursion
+          ;; FIXME: make generic
           (let ((print-level nil)
                 (print-length nil))
             (print sexp (current-buffer))))
         (pop-to-buffer buffer)))
     
     (let* ((inhibit-read-only t)
-	   (expansion (macrostep-expand-1 sexp))
+	   (expansion (funcall macrostep-expand-1-function sexp))
 	   (existing-ol (macrostep-overlay-at-point))
 	   (macrostep-gensym-depth macrostep-gensym-depth)
 	   (macrostep-gensyms-this-level nil)
-	   text priority)
+	   text priority verbatim)
       (unless macrostep-mode (macrostep-mode t))
       (if existing-ol			; expanding an expansion
 	  (setq text sexp
+                verbatim nil
 		priority (1+ (overlay-get existing-ol 'priority))
 
 		macrostep-gensym-depth
 		(overlay-get existing-ol 'macrostep-gensym-depth))
 	;; expanding buffer text
-	(setq text (buffer-substring (point) (scan-sexps (point) 1))
+	(setq text (buffer-substring
+                    ;; FIXME: make generic (non-sexp languages?)
+                    (point) (scan-sexps (point) 1))
+              verbatim t
 	      priority 1
 	      macrostep-gensym-depth -1))
 
@@ -445,6 +459,7 @@ buffer and expand the next macro form found, if any."
             (overlay-put new-ol 'priority priority)
             (overlay-put new-ol 'macrostep-original-text text)
             (overlay-put new-ol 'macrostep-gensym-depth macrostep-gensym-depth)
+            (overlay-put new-ol 'macrostep-verbatim verbatim)
             (push new-ol macrostep-overlays)))))))
 
 (defun macrostep-collapse ()
@@ -507,6 +522,28 @@ If no more macro expansions are visible after this, exit
 
 
 ;;; Utility functions
+(defun macrostep--macro-form-near-point ()
+  "Return the macro form nearest point, possibly moving point to it.
+
+If point is not in or before a macro form (as determined by
+`macrostep-sexp-at-point-function' and
+`macrostep-macro-form-p-function'), attempts to search forward in
+the buffer for the next macro, using `macrostep-next-macro'.
+Signals an error if no macro form is found."
+  (let ((sexp (funcall macrostep-sexp-at-point-function))
+        (macrostep-environment (funcall macrostep-environment-at-point-function)))
+    ;; If point is not before a macro form, try to find the next one in the buffer
+    (if (funcall macrostep-macro-form-p-function sexp)
+        sexp
+      (condition-case nil
+          (progn
+            (macrostep-next-macro)
+            (funcall macrostep-sexp-at-point-function))
+        (error
+         (if (consp sexp)
+             (error "(%s ...) is not a macro form" (car sexp))
+           (error "Text at point is not a macro form.")))))))
+
 (defun macrostep-macro-form-p (form)
   "Return t if FORM is a sexp that would be evaluated via macro expansion."
   (if (or (not (consp form))
@@ -638,9 +675,10 @@ Also removes the overlay from `macrostep-overlays'."
       (unless no-restore-p
 	(macrostep-collapse-overlays-in
 	 (overlay-start overlay) (overlay-end overlay))
-	(let ((text (overlay-get overlay 'macrostep-original-text)))
-	  (goto-char (overlay-start overlay))
-	  (macrostep-replace-sexp-at-point text (stringp text))))
+        (let ((text (overlay-get overlay 'macrostep-original-text))
+              (verbatim (overlay-get overlay 'macrostep-verbatim)))
+          (goto-char (overlay-start overlay))
+          (macrostep-replace-sexp-at-point text verbatim)))
       ;; Remove overlay from the list and delete it
       (setq macrostep-overlays
 	    (delq overlay macrostep-overlays))
@@ -656,40 +694,41 @@ Will not collapse overlays that begin at START and end at END."
 	     (overlay-get ol 'macrostep-original-text))
 	(macrostep-collapse-overlay ol t))))
 
-(defun macrostep-replace-sexp-at-point (sexp &optional original)
+(defun macrostep-replace-sexp-at-point (sexp &optional verbatim)
   "Replace the form following point with SEXP.
 
-If ORIGINAL is non-nil, SEXP is assumed to be a string
+If VERBATIM is non-nil, SEXP is assumed to be a string
 representing the original source text, and inserted verbatim as a
-replacement for the form following point. Otherwise, if ORIGINAL
-is nil, SEXP is treated as the macro expansion of the source,
-inserted using `macrostep-print-sexp' and pretty-printed using
-`pp-buffer'."
+replacement for the form following point. Otherwise, SEXP is
+treated as the macro expansion of the source and inserted using
+`macrostep-print-function'."
+  (save-excursion
+    ;; Insert new text first so that existing overlays don't
+    ;; evaporate
+    (if verbatim
+        (insert sexp)                 ; insert original source text
+      (funcall macrostep-print-function sexp))
+    ;; Delete the old form and remove any sub-form overlays in it
+    ;; FIXME: make generic
+    (let ((start (point)) (end (scan-sexps (point) 1)))
+      (macrostep-collapse-overlays-in start end)
+      (delete-region start end))))
+
+(defun macrostep-pp (sexp)
   (let ((print-quoted t))
-    (save-excursion
-      ;; Insert new text first so that existing overlays don't
-      ;; evaporate
-      (if original
-	  (insert sexp)                 ; insert original source text
-	(macrostep-print-sexp sexp))
-      ;; Delete the old form and remove any sub-form overlays in it
-      (let ((start (point)) (end (scan-sexps (point) 1)))
-	(macrostep-collapse-overlays-in start end)
-	(delete-region start end)))
-	
-    (unless original                   ; inserting macro expansion
-      (save-restriction
-        ;; point is now before the expanded form; pretty-print it
-        (narrow-to-region (point) (scan-sexps (point) 1))
-        (save-excursion
-          (pp-buffer)
-          ;; remove the extra newline that pp-buffer inserts
-          (goto-char (point-max))
-          (delete-region
-           (point)
-           (save-excursion (skip-chars-backward " \t\n") (point))))
-        (widen)
-        (indent-sexp)))))
+    (macrostep-print-sexp sexp)
+    ;; Point is now after the expanded form; pretty-print it
+    (save-restriction
+      (narrow-to-region (scan-sexps (point) -1) (point))
+      (save-excursion
+        (pp-buffer)
+        ;; Remove the extra newline inserted by pp-buffer
+        (goto-char (point-max))
+        (delete-region
+         (point)
+         (save-excursion (skip-chars-backward " \t\n") (point))))
+      (widen)
+      (indent-sexp))))
 
 (defun macrostep-get-gensym-face (symbol)
   "Return the face to use in fontifying SYMBOL in printed macro expansions.
@@ -819,6 +858,29 @@ expansion will not be fontified.  See also
    ;; Print everything except symbols and lists as normal
    (t (prin1 sexp (current-buffer)))))
 
+
+
+;;; Basic SLIME support
+;;;###autoload
+(defun macrostep-slime-mode-hook ()
+  (setq macrostep-sexp-at-point-function #'slime-sexp-at-point)
+  (setq macrostep-environment-at-point-function ; FIXME?
+        (lambda () nil))
+  (setq macrostep-expand-1-function
+        (lambda (sexp)
+          (slime-eval `(swank:swank-macroexpand-1 ,sexp))))
+  (setq macrostep-print-function #'macrostep-slime-insert)
+  (setq macrostep-macro-form-p-function ; FIXME?
+        (lambda (form) t)))
+
+;;;###autoload
+(add-hook 'slime-mode-hook #'macrostep-slime-mode-hook)
+
+(defun macrostep-slime-insert (expansion)
+  "Insert EXPANSION at point, indenting to match the current column."
+  (let* ((indent-string (concat "\n" (make-string (current-column) ? )))
+         (expansion (replace-regexp-in-string "\n" indent-string expansion)))
+    (insert expansion)))
 
 
 (provide 'macrostep)
