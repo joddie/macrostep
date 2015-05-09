@@ -866,21 +866,28 @@ expansion will not be fontified.  See also
   (setq macrostep-sexp-at-point-function #'slime-sexp-at-point)
   (setq macrostep-environment-at-point-function ; FIXME?
         (lambda () nil))
-  (setq macrostep-expand-1-function
-        (lambda (sexp)
-          (slime-eval `(swank:swank-macroexpand-1 ,sexp))))
+  (setq macrostep-expand-1-function #'macrostep-slime-expand-1)
   (setq macrostep-print-function #'macrostep-slime-insert)
-  (setq macrostep-macro-form-p-function ; FIXME?
-        (lambda (form) t)))
+  (setq macrostep-macro-form-p-function #'macrostep-slime-macro-form-p))
 
 ;;;###autoload
 (add-hook 'slime-mode-hook #'macrostep-slime-mode-hook)
+
+(defun macrostep-slime-expand-1 (sexp)
+  (slime-eval `(swank:swank-macroexpand-1 ,sexp)))
 
 (defun macrostep-slime-insert (expansion)
   "Insert EXPANSION at point, indenting to match the current column."
   (let* ((indent-string (concat "\n" (make-string (current-column) ? )))
          (expansion (replace-regexp-in-string "\n" indent-string expansion)))
     (insert expansion)))
+
+(defun macrostep-slime-macro-form-p (form)
+  (slime-eval
+   `(cl:let ((sexp (cl:read-from-string ,form)))
+      (cl:and (cl:consp sexp)
+              (cl:macro-function (cl:car sexp))
+              t))))
 
 
 (provide 'macrostep)
