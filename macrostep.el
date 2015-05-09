@@ -880,7 +880,33 @@ expansion will not be fontified.  See also
   "Insert EXPANSION at point, indenting to match the current column."
   (let* ((indent-string (concat "\n" (make-string (current-column) ? )))
          (expansion (replace-regexp-in-string "\n" indent-string expansion)))
-    (insert expansion)))
+    (save-excursion
+      (insert expansion))
+    (macrostep-slime--propertize-macros)
+    (forward-sexp)))
+
+(defun macrostep-slime--propertize-macros ()
+  "Put text properties on macros in the form following point."
+  (save-excursion
+    (let ((limit (scan-sexps (point) 1)))
+      (while (search-forward-regexp (rx (submatch "(")
+                                        (submatch
+                                         (+ (or (syntax word)
+                                                (syntax symbol)))))
+                                    limit t)
+        (let ((paren-begin (match-beginning 1)) (paren-end (match-end 1))
+              (symbol-begin (match-beginning 2)) (symbol-end (match-end 2)))
+          (save-excursion
+            (goto-char (match-beginning 0))
+            (let ((sexp (slime-sexp-at-point)))
+              (when (macrostep-slime-macro-form-p sexp)
+                ;; Hack to make `macrostep-next-macro' etc. work.
+                ;; TODO: Re-consider how macro forms are marked in
+                ;; expanded text.
+                (put-text-property paren-begin paren-end
+                                   'macrostep-expanded-text sexp)
+                (put-text-property symbol-begin symbol-end
+                                   'font-lock-face 'macrostep-macro-face)))))))))
 
 (defun macrostep-slime-macro-form-p (form)
   (slime-eval
