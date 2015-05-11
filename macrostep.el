@@ -727,8 +727,11 @@ treated as the macro expansion of the source and inserted using
         (delete-region
          (point)
          (save-excursion (skip-chars-backward " \t\n") (point))))
+      ;; Indent the newly-inserted form in context
       (widen)
-      (indent-sexp))))
+      (save-excursion
+        (backward-list)
+        (indent-sexp)))))
 
 (defun macrostep-get-gensym-face (symbol)
   "Return the face to use in fontifying SYMBOL in printed macro expansions.
