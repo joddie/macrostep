@@ -401,6 +401,9 @@ buffer and expand the next macro form found, if any."
   (interactive)
   (let ((sexp (macrostep--macro-form-near-point))
         (macrostep-environment (funcall macrostep-environment-at-point-function))
+        (text (buffer-substring
+               ;; FIXME: make generic (non-sexp languages?)
+               (point) (scan-sexps (point) 1)))
         (buffer-major-mode major-mode))
 
     ;; Create a dedicated macro-expansion buffer and copy the text to
@@ -413,11 +416,7 @@ buffer and expand the next macro form found, if any."
         (funcall buffer-major-mode)
         (setq macrostep-expansion-buffer t)
         (setq macrostep-outer-environment macrostep-environment)
-        (save-excursion
-          ;; FIXME: make generic
-          (let ((print-level nil)
-                (print-length nil))
-            (print sexp (current-buffer))))
+        (save-excursion (insert text))
         (pop-to-buffer buffer)))
     
     (let* ((inhibit-read-only t)
@@ -425,22 +424,17 @@ buffer and expand the next macro form found, if any."
 	   (existing-ol (macrostep-overlay-at-point))
 	   (macrostep-gensym-depth macrostep-gensym-depth)
 	   (macrostep-gensyms-this-level nil)
-	   text priority verbatim)
+	   priority)
       (unless macrostep-mode (macrostep-mode t))
-      (if existing-ol			; expanding an expansion
-	  (setq text sexp
-                verbatim nil
-		priority (1+ (overlay-get existing-ol 'priority))
-
-		macrostep-gensym-depth
-		(overlay-get existing-ol 'macrostep-gensym-depth))
-	;; expanding buffer text
-	(setq text (buffer-substring
-                    ;; FIXME: make generic (non-sexp languages?)
-                    (point) (scan-sexps (point) 1))
-              verbatim t
-	      priority 1
-	      macrostep-gensym-depth -1))
+      (if existing-ol
+          ;; Expanding part of a previous macro-expansion
+	  (progn
+            (setq priority (1+ (overlay-get existing-ol 'priority)))
+            (setq macrostep-gensym-depth
+                  (overlay-get existing-ol 'macrostep-gensym-depth)))
+	;; Expanding source buffer text
+	(setq priority 1)
+        (setq macrostep-gensym-depth -1))
 
       (with-silent-modifications
         (atomic-change-group
@@ -459,7 +453,6 @@ buffer and expand the next macro form found, if any."
             (overlay-put new-ol 'priority priority)
             (overlay-put new-ol 'macrostep-original-text text)
             (overlay-put new-ol 'macrostep-gensym-depth macrostep-gensym-depth)
-            (overlay-put new-ol 'macrostep-verbatim verbatim)
             (push new-ol macrostep-overlays)))))))
 
 (defun macrostep-collapse ()
@@ -675,10 +668,9 @@ Also removes the overlay from `macrostep-overlays'."
       (unless no-restore-p
 	(macrostep-collapse-overlays-in
 	 (overlay-start overlay) (overlay-end overlay))
-        (let ((text (overlay-get overlay 'macrostep-original-text))
-              (verbatim (overlay-get overlay 'macrostep-verbatim)))
+        (let ((text (overlay-get overlay 'macrostep-original-text)))
           (goto-char (overlay-start overlay))
-          (macrostep-replace-sexp-at-point text verbatim)))
+          (macrostep-replace-sexp-at-point text t)))
       ;; Remove overlay from the list and delete it
       (setq macrostep-overlays
 	    (delq overlay macrostep-overlays))
@@ -897,19 +889,21 @@ expansion will not be fontified.  See also
                                          (+ (or (syntax word)
                                                 (syntax symbol)))))
                                     limit t)
-        (let ((paren-begin (match-beginning 1)) (paren-end (match-end 1))
-              (symbol-begin (match-beginning 2)) (symbol-end (match-end 2)))
-          (save-excursion
-            (goto-char (match-beginning 0))
-            (let ((sexp (slime-sexp-at-point)))
-              (when (macrostep-slime-macro-form-p sexp)
-                ;; Hack to make `macrostep-next-macro' etc. work.
-                ;; TODO: Re-consider how macro forms are marked in
-                ;; expanded text.
-                (put-text-property paren-begin paren-end
-                                   'macrostep-expanded-text sexp)
-                (put-text-property symbol-begin symbol-end
-                                   'font-lock-face 'macrostep-macro-face)))))))))
+        (unless (let ((case-fold-search t))
+                  (string-match (match-string 2) "lambda"))
+          (let ((paren-begin (match-beginning 1)) (paren-end (match-end 1))
+                (symbol-begin (match-beginning 2)) (symbol-end (match-end 2)))
+            (save-excursion
+              (goto-char (match-beginning 0))
+              (let ((sexp (slime-sexp-at-point)))
+                (when (macrostep-slime-macro-form-p sexp)
+                  ;; Hack to make `macrostep-next-macro' etc. work.
+                  ;; TODO: Re-consider how macro forms are marked in
+                  ;; expanded text.
+                  (put-text-property paren-begin paren-end
+                                     'macrostep-expanded-text sexp)
+                  (put-text-property symbol-begin symbol-end
+                                     'font-lock-face 'macrostep-macro-face))))))))))
 
 (defun macrostep-slime-macro-form-p (form)
   (slime-eval
