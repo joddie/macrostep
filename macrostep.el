@@ -285,8 +285,18 @@ buffer.")
   "Face for macros in macro-expanded code."
   :group 'macrostep)
 
+(defface macrostep-compiler-macro-face
+  '((t :slant italic))
+  "Face for compiler macros in macro-expanded code."
+  :group 'macrostep)
+
 (defcustom macrostep-expand-in-separate-buffer nil
   "When non-nil, show expansions in a separate buffer instead of inline."
+  :group 'macrostep
+  :type 'boolean)
+
+(defcustom macrostep-expand-compiler-macros t
+  "When non-nil, expand compiler macros as well as `defmacro' and `macrolet' macros."
   :group 'macrostep
   :type 'boolean)
 
@@ -538,46 +548,79 @@ Signals an error if no macro form is found."
            (error "Text at point is not a macro form.")))))))
 
 (defun macrostep-macro-form-p (form)
-  "Return t if FORM is a sexp that would be evaluated via macro expansion."
+  "Return non-nil if FORM would be evaluated via macro expansion.
+
+If FORM is an invocation of a macro defined by `defmacro' or an
+enclosing `cl-macrolet' form, return the symbol `macro'.
+
+If `macrostep-expand-compiler-macros' is non-nil and FORM is a
+call to a function with a compiler macro, return the symbol
+`compiler-macro'.
+
+Otherwise, return nil."
+  (car (macrostep--macro-form-info form t)))
+
+(defun macrostep--macro-form-info (form &optional inhibit-autoload)
+  "Return information about macro definitions that apply to FORM.
+
+If no macros are involved in the evaluation of FORM, returns nil.
+Otherwise, returns a cons (TYPE . DEFINITION).
+
+If FORM would be evaluated by a macro defined by `defmacro',
+`cl-macrolet', etc., TYPE is the symbol `macro' and DEFINITION is
+the macro definition, as a function.
+
+If `macrostep-expand-compiler-macros' is non-nil and FORM would
+be compiled using a compiler macro, TYPE is the symbol
+`compmiler-macro' and DEFINITION is the function that implements
+the compiler macro.
+
+If FORM is an invocation of an autoloaded macro, the behavior
+depends on the value of INHIBIT-AUTOLOAD.  If INHIBIT-AUTOLOAD is
+nil, the file containing the macro definition will be loaded
+using `load-library' and the macro definition returned as normal.
+If INHIBIT-AUTOLOAD is non-nil, no files will be loaded, and the
+value of DEFINITION in the result will be nil."
   (if (or (not (consp form))
-	  (eq (car form) 'lambda)) 	; hack
+          (not (symbolp (car form))))
       nil
-    (condition-case err
-        (or
-         ;; Locally bound as a macro?
-         (assq (car form) macrostep-environment)
-         ;; Globally defined?
-         (let ((fun (indirect-function (car form))))
-           (and (consp fun)
-                (or (eq (car fun) 'macro)
-                    (and
-                     (eq (car fun) 'autoload)
-                     (eq (nth 4 fun) 'macro))))))
-      (error nil))))
-
-(defun macrostep-macro-definition (form)
-  "Return, as a function, the macro definition to apply in expanding FORM."
-  (or
-   ;; Locally bound by `macrolet'
-   (cdr (assq (car form) macrostep-environment))
-   ;; Globally defined
-   (let ((fun (indirect-function (car form))))
-     (if (consp fun)
-         (case (car fun)
-           ((macro)
-            (cdr fun))
-
-           ((autoload)
-            (load-library (nth 1 fun))
-            (macrostep-macro-definition form)))
-       (error "(%s ...) is not a macro form" form)))))
+    (let* ((head (car form))
+           (macrolet-definition
+            (assoc-default head macrostep-environment 'eq)))
+      (if macrolet-definition
+          `(macro . ,macrolet-definition)
+        (let ((compiler-macro-definition
+               (and macrostep-expand-compiler-macros
+                    (get head 'compiler-macro))))
+          (if compiler-macro-definition
+              `(compiler-macro . ,compiler-macro-definition)
+            (condition-case _
+                (let ((fun (indirect-function head)))
+                  (pcase fun
+                    (`(macro . ,definition)
+                      fun)
+                    (`(autoload ,_ ,_ ,_ macro . ,_)
+                      (if inhibit-autoload
+                          `(macro)
+                        (autoload-do-load fun)
+                        (macrostep--macro-form-info form nil)))
+                    (_ nil)))
+              (void-function nil))))))))
 
 (defun macrostep-expand-1 (form)
   "Return result of macro-expanding the top level of FORM by exactly one step.
 Unlike `macroexpand', this function does not continue macro
 expansion until a non-macro-call results."
-  (if (not (macrostep-macro-form-p form)) form
-    (apply (macrostep-macro-definition form) (cdr form))))
+  (pcase (macrostep--macro-form-info form)
+    (`nil form)
+    (`(macro . ,definition)
+     (apply definition (cdr form)))
+    (`(compiler-macro . ,definition)
+     (let ((expansion
+            (apply definition form (cdr form))))
+       (if (equal form expansion)
+           (error "Form left unchanged by compiler macro")
+         expansion)))))
 
 (defun macrostep-environment-at-point ()
   "Return the local macro-expansion environment at point, if any.
@@ -820,7 +863,10 @@ expansion will not be fontified.  See also
                      ;; Fontify the head of the macro
                      (macrostep-propertize
                          (macrostep-print-sexp head)
-                       'font-lock-face 'macrostep-macro-face))
+                       'font-lock-face
+                       (pcase (macrostep-macro-form-p sexp)
+                         (`macro 'macrostep-macro-face)
+                         (`compiler-macro 'macrostep-compiler-macro-face))))
                  ;; Not a macro form
                  (insert "(")
                  (macrostep-print-sexp head quoted-form-p))
