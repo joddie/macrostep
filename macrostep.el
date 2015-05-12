@@ -581,31 +581,31 @@ nil, the file containing the macro definition will be loaded
 using `load-library' and the macro definition returned as normal.
 If INHIBIT-AUTOLOAD is non-nil, no files will be loaded, and the
 value of DEFINITION in the result will be nil."
-  (if (or (not (consp form))
-          (not (symbolp (car form))))
-      nil
-    (let* ((head (car form))
-           (macrolet-definition
-            (assoc-default head macrostep-environment 'eq)))
-      (if macrolet-definition
-          `(macro . ,macrolet-definition)
-        (let ((compiler-macro-definition
-               (and macrostep-expand-compiler-macros
-                    (get head 'compiler-macro))))
-          (if compiler-macro-definition
-              `(compiler-macro . ,compiler-macro-definition)
-            (condition-case _
-                (let ((fun (indirect-function head)))
-                  (pcase fun
-                    (`(macro . ,definition)
-                      fun)
-                    (`(autoload ,_ ,_ ,_ macro . ,_)
-                      (if inhibit-autoload
-                          `(macro)
-                        (autoload-do-load fun)
-                        (macrostep--macro-form-info form nil)))
-                    (_ nil)))
-              (void-function nil))))))))
+  (pcase form
+    (`(lambda . ,_) nil)
+    (`(,(and (pred symbolp) head) . ,_)
+      (let ((macrolet-definition
+             (assoc-default head macrostep-environment 'eq)))
+        (if macrolet-definition
+            `(macro . ,macrolet-definition)
+          (let ((compiler-macro-definition
+                 (and macrostep-expand-compiler-macros
+                      (get head 'compiler-macro))))
+            (if compiler-macro-definition
+                `(compiler-macro . ,compiler-macro-definition)
+              (condition-case _
+                  (let ((fun (indirect-function head)))
+                    (pcase fun
+                      (`(macro . ,definition)
+                        `(macro . ,definition))
+                      (`(autoload ,_ ,_ ,_ macro . ,_)
+                        (if inhibit-autoload
+                            `(macro)
+                          (autoload-do-load fun)
+                          (macrostep--macro-form-info form nil)))
+                      (_ nil)))
+                (void-function nil)))))))
+    (_ nil)))
 
 (defun macrostep-expand-1 (form)
   "Return result of macro-expanding the top level of FORM by exactly one step.
