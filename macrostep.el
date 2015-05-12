@@ -941,36 +941,39 @@ expansion will not be fontified.  See also
                                          (+ (or (syntax word)
                                                 (syntax symbol)))))
                                     limit t)
-        (unless (let ((case-fold-search t))
-                  (string-match (match-string 2) "lambda"))
-          (let ((paren-begin (match-beginning 1)) (paren-end (match-end 1))
-                (symbol-begin (match-beginning 2)) (symbol-end (match-end 2)))
-            (save-excursion
-              (goto-char (match-beginning 0))
-              (let* ((sexp (slime-sexp-at-point))
-                     (macro-type (macrostep-slime-macro-form-p sexp)))
-                (when macro-type
-                  (put-text-property paren-begin paren-end
-                                     'macrostep-macro-start t)
-                  (put-text-property symbol-begin symbol-end
-                                     'font-lock-face
-                                     (cl-ecase macro-type
-                                       (macro
-                                        'macrostep-macro-face)
-                                       (compiler-macro
-                                        'macrostep-compiler-macro-face))))))))))))
+        (let ((paren-begin (match-beginning 1)) (paren-end (match-end 1))
+              (symbol-begin (match-beginning 2)) (symbol-end (match-end 2)))
+          (save-excursion
+            (goto-char (match-beginning 0))
+            (let* ((sexp (slime-sexp-at-point))
+                   (macro-type (macrostep-slime-macro-form-p sexp)))
+              (when macro-type
+                (put-text-property paren-begin paren-end
+                                   'macrostep-macro-start t)
+                (put-text-property symbol-begin symbol-end
+                                   'font-lock-face
+                                   (cl-ecase macro-type
+                                     (macro
+                                      'macrostep-macro-face)
+                                     (compiler-macro
+                                      'macrostep-compiler-macro-face)))))))))))
 
 (defun macrostep-slime-macro-form-p (form)
   (slime-eval
-   `(cl:let ((sexp (cl:read-from-string ,form)))
-      (cl:when (cl:consp sexp)
-        (cl:cond
-          ((cl:macro-function (cl:car sexp))
-           'macro)
-          ((cl:compiler-macro-function (cl:car sexp))
-           'compiler-macro)
-          (t
-           nil))))))
+   `(cl:let ((sexp (cl:read-from-string ,form))
+             (expand-compiler-macros ,macrostep-expand-compiler-macros))
+      (cl:cond
+        ((cl:not (cl:consp sexp))
+         nil)
+        ((cl:eq (cl:car sexp) 'cl:lambda)
+         nil)
+        ((cl:macro-function (cl:car sexp))
+         'macro)
+        ((cl:and expand-compiler-macros
+                 (cl:compiler-macro-function (cl:car sexp)))
+         'compiler-macro)
+        (t
+         nil)))))
 
 
 (provide 'macrostep)
