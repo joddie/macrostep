@@ -497,10 +497,10 @@ If no more macro expansions are visible after this, exit
   "Move point forward to the next macro form in macro-expanded text."
   (interactive)
   (let* ((start 
-	 (if (get-text-property (point) 'macrostep-expanded-text)
+	 (if (get-text-property (point) 'macrostep-macro-start)
 	     (1+ (point))
 	   (point)))
-	 (next (next-single-property-change start 'macrostep-expanded-text)))
+	 (next (next-single-property-change start 'macrostep-macro-start)))
     (if next
 	(goto-char next)
       (error "No more macro forms found"))))
@@ -513,9 +513,9 @@ If no more macro expansions are visible after this, exit
       (while
 	  (progn
 	    (setq prev
-		  (previous-single-property-change (point) 'macrostep-expanded-text))
+		  (previous-single-property-change (point) 'macrostep-macro-start))
 	    (if (or (not prev)
-		    (get-text-property (1- prev) 'macrostep-expanded-text))
+		    (get-text-property (1- prev) 'macrostep-macro-start))
 		nil
 	      (prog1 t (goto-char prev))))))
     (if prev
@@ -829,6 +829,7 @@ expansion will not be fontified.  See also
              (macrostep-propertize
                  (insert "`")
                'macrostep-expanded-text sexp
+               'macrostep-macro-start t
                'font-lock-face 'macrostep-macro-face)
              (macrostep-print-sexp (cadr sexp) t))
 
@@ -859,6 +860,7 @@ expansion will not be fontified.  See also
                      ;; opening paren
                      (macrostep-propertize
                          (insert "(")
+                       'macrostep-macro-start t
                        'macrostep-expanded-text sexp)
                      ;; Fontify the head of the macro
                      (macrostep-propertize
@@ -948,11 +950,8 @@ expansion will not be fontified.  See also
               (let* ((sexp (slime-sexp-at-point))
                      (macro-type (macrostep-slime-macro-form-p sexp)))
                 (when macro-type
-                  ;; Hack to make `macrostep-next-macro' etc. work.
-                  ;; TODO: Re-consider how macro forms are marked in
-                  ;; expanded text.
                   (put-text-property paren-begin paren-end
-                                     'macrostep-expanded-text sexp)
+                                     'macrostep-macro-start t)
                   (put-text-property symbol-begin symbol-end
                                      'font-lock-face
                                      (cl-ecase macro-type
