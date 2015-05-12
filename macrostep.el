@@ -915,7 +915,11 @@ expansion will not be fontified.  See also
 (add-hook 'slime-mode-hook #'macrostep-slime-mode-hook)
 
 (defun macrostep-slime-expand-1 (sexp)
-  (slime-eval `(swank:swank-macroexpand-1 ,sexp)))
+  (cl-ecase (macrostep-slime-macro-form-p sexp)
+    (macro
+     (slime-eval `(swank:swank-macroexpand-1 ,sexp)))
+    (compiler-macro
+     (slime-eval `(swank:swank-compiler-macroexpand-1 ,sexp)))))
 
 (defun macrostep-slime-insert (expansion)
   "Insert EXPANSION at point, indenting to match the current column."
@@ -941,22 +945,33 @@ expansion will not be fontified.  See also
                 (symbol-begin (match-beginning 2)) (symbol-end (match-end 2)))
             (save-excursion
               (goto-char (match-beginning 0))
-              (let ((sexp (slime-sexp-at-point)))
-                (when (macrostep-slime-macro-form-p sexp)
+              (let* ((sexp (slime-sexp-at-point))
+                     (macro-type (macrostep-slime-macro-form-p sexp)))
+                (when macro-type
                   ;; Hack to make `macrostep-next-macro' etc. work.
                   ;; TODO: Re-consider how macro forms are marked in
                   ;; expanded text.
                   (put-text-property paren-begin paren-end
                                      'macrostep-expanded-text sexp)
                   (put-text-property symbol-begin symbol-end
-                                     'font-lock-face 'macrostep-macro-face))))))))))
+                                     'font-lock-face
+                                     (cl-ecase macro-type
+                                       (macro
+                                        'macrostep-macro-face)
+                                       (compiler-macro
+                                        'macrostep-compiler-macro-face))))))))))))
 
 (defun macrostep-slime-macro-form-p (form)
   (slime-eval
    `(cl:let ((sexp (cl:read-from-string ,form)))
-      (cl:and (cl:consp sexp)
-              (cl:macro-function (cl:car sexp))
-              t))))
+      (cl:when (cl:consp sexp)
+        (cl:cond
+          ((cl:macro-function (cl:car sexp))
+           'macro)
+          ((cl:compiler-macro-function (cl:car sexp))
+           'compiler-macro)
+          (t
+           nil))))))
 
 
 (provide 'macrostep)
