@@ -960,20 +960,21 @@ expansion will not be fontified.  See also
 
 (defun macrostep-slime-macro-form-p (form)
   (slime-eval
-   `(cl:let ((sexp (cl:read-from-string ,form))
-             (expand-compiler-macros ,macrostep-expand-compiler-macros))
-      (cl:cond
-        ((cl:not (cl:consp sexp))
-         nil)
-        ((cl:eq (cl:car sexp) 'cl:lambda)
-         nil)
-        ((cl:macro-function (cl:car sexp))
-         'macro)
-        ((cl:and expand-compiler-macros
-                 (cl:compiler-macro-function (cl:car sexp)))
-         'compiler-macro)
-        (t
-         nil)))))
+   `(swank::with-buffer-syntax ()
+      (cl:let ((sexp (cl:read-from-string ,form))
+               (expand-compiler-macros ,macrostep-expand-compiler-macros))
+        (cl:cond
+          ((cl:not (cl:consp sexp))
+           nil)
+          ((cl:eq (cl:car sexp) 'cl:lambda)
+           nil)
+          ((cl:macro-function (cl:car sexp))
+           'macro)
+          ((cl:and expand-compiler-macros
+                   (cl:compiler-macro-function (cl:car sexp)))
+           'compiler-macro)
+          (t
+           nil))))))
 
 
 (provide 'macrostep)
