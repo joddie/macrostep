@@ -926,11 +926,13 @@ expansion will not be fontified.  See also
 (defun macrostep-slime-insert (expansion)
   "Insert EXPANSION at point, indenting to match the current column."
   (let* ((indent-string (concat "\n" (make-string (current-column) ? )))
-         (expansion (replace-regexp-in-string "\n" indent-string expansion)))
+         (expansion (replace-regexp-in-string "\n" indent-string expansion))
+         (end-point))
     (save-excursion
-      (insert expansion))
+      (insert expansion)
+      (setq end-point (point)))
     (macrostep-slime--propertize-macros)
-    (forward-sexp)))
+    (goto-char end-point)))
 
 (defun macrostep-slime--propertize-macros ()
   "Put text properties on macros in the form following point."
