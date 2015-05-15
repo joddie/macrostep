@@ -318,6 +318,9 @@ buffer.")
 (defvar-local macrostep-sexp-at-point-function
     #'macrostep-sexp-at-point)
 
+(defvar-local macrostep-sexp-bound-function
+    #'macrostep-sexp-bound)
+
 (defvar-local macrostep-environment-at-point-function
     #'macrostep-environment-at-point)
 
@@ -409,61 +412,67 @@ buffer temporarily read-only. If macrostep-mode is active and the
 form following point is not a macro form, search forward in the
 buffer and expand the next macro form found, if any."
   (interactive)
-  (let ((sexp (macrostep--macro-form-near-point))
-        (macrostep-environment (funcall macrostep-environment-at-point-function))
-        (text (buffer-substring
-               ;; FIXME: make generic (non-sexp languages?)
-               (point) (scan-sexps (point) 1)))
-        (buffer-major-mode major-mode))
+  (let* ((sexp (macrostep--macro-form-near-point))
+         (start (point))
+         (end (copy-marker (funcall macrostep-sexp-bound-function)))
+         (text (buffer-substring start end))
+         (macrostep-environment
+          (funcall macrostep-environment-at-point-function))
+         (expansion (funcall macrostep-expand-1-function sexp)))
 
     ;; Create a dedicated macro-expansion buffer and copy the text to
     ;; be expanded into it, if required
     (when (and macrostep-expand-in-separate-buffer
                (not macrostep-expansion-buffer))
-      (let ((buffer
+      (let ((mode major-mode)
+            (buffer
              (get-buffer-create (generate-new-buffer-name "*macro expansion*"))))
         (set-buffer buffer)
-        (funcall buffer-major-mode)
+        (funcall mode)
         (setq macrostep-expansion-buffer t)
         (setq macrostep-outer-environment macrostep-environment)
-        (save-excursion (insert text))
+        (save-excursion
+          (setq start (point))
+          (insert text)
+          (setq end (point-marker)))
         (pop-to-buffer buffer)))
     
-    (let* ((inhibit-read-only t)
-	   (expansion (funcall macrostep-expand-1-function sexp))
-	   (existing-ol (macrostep-overlay-at-point))
-	   (macrostep-gensym-depth macrostep-gensym-depth)
-	   (macrostep-gensyms-this-level nil)
-	   priority)
-      (unless macrostep-mode (macrostep-mode t))
-      (if existing-ol
-          ;; Expanding part of a previous macro-expansion
-	  (progn
-            (setq priority (1+ (overlay-get existing-ol 'priority)))
+    (unless macrostep-mode (macrostep-mode t))
+    (let ((existing-overlay (macrostep-overlay-at-point))
+          (macrostep-gensym-depth macrostep-gensym-depth)
+          (macrostep-gensyms-this-level nil)
+          priority)
+      (if existing-overlay
+	  (progn        ; Expanding part of a previous macro-expansion
+            (setq priority (1+ (overlay-get existing-overlay 'priority)))
             (setq macrostep-gensym-depth
-                  (overlay-get existing-ol 'macrostep-gensym-depth)))
+                  (overlay-get existing-overlay 'macrostep-gensym-depth)))
 	;; Expanding source buffer text
 	(setq priority 1)
         (setq macrostep-gensym-depth -1))
 
       (with-silent-modifications
         (atomic-change-group
-          (macrostep-replace-sexp-at-point expansion)
-          (let ((new-ol
-                 (make-overlay (point)
-                               (scan-sexps (point) 1))))
-            ;; Move overlay over newline to make it prettier
-            (when (equal (char-after (overlay-end new-ol)) ?\n)
-              (move-overlay new-ol
-                            (overlay-start new-ol) (+ (overlay-end new-ol) 1)))
-            ;; Highlight the overlay in original source buffers only
-            (unless macrostep-expansion-buffer
-              (overlay-put new-ol 'face 'macrostep-expansion-highlight-face))
-            (overlay-put new-ol 'evaporate t)
-            (overlay-put new-ol 'priority priority)
-            (overlay-put new-ol 'macrostep-original-text text)
-            (overlay-put new-ol 'macrostep-gensym-depth macrostep-gensym-depth)
-            (push new-ol macrostep-overlays)))))))
+          (let ((inhibit-read-only t))
+            (save-excursion
+              ;; Insert expansion
+              (funcall macrostep-print-function expansion)
+              ;; Delete the original form
+              (macrostep-collapse-overlays-in (point) end)
+              (delete-region (point) end)
+              ;; Create a new overlay
+              (let ((overlay
+                     (make-overlay start
+                                   (if (looking-at "\n")
+                                       (1+ (point))
+                                     (point)))))
+                (unless macrostep-expansion-buffer
+                  ;; Highlight the overlay in original source buffers only
+                  (overlay-put overlay 'face 'macrostep-expansion-highlight-face))
+                (overlay-put overlay 'priority priority)
+                (overlay-put overlay 'macrostep-original-text text)
+                (overlay-put overlay 'macrostep-gensym-depth macrostep-gensym-depth)
+                (push overlay macrostep-overlays)))))))))
 
 (defun macrostep-collapse ()
   "Collapse the innermost macro expansion near point to its source text.
@@ -694,6 +703,8 @@ Also moves point to the beginning of the returned s-expression."
 	(scan-sexps (point) 1)
 	(sexp-at-point))))
 
+(defun macrostep-sexp-bound ()
+  (scan-sexps (point) 1))
 
 (defun macrostep-collapse-overlay (overlay &optional no-restore-p)
   "Collapse a macro-expansion overlay and restore the unexpanded source text.
@@ -704,20 +715,25 @@ collapsing all the sub-expansions of an outer overlay, since the
 outer overlay will restore the original source itself.
 
 Also removes the overlay from `macrostep-overlays'."
-  (when (and (overlay-start overlay)
-	     (eq (overlay-buffer overlay) (current-buffer)))
-      ;; If we're cleaning up we don't need to bother restoring text
-      ;; or checking for inner overlays to delete
-      (unless no-restore-p
-	(macrostep-collapse-overlays-in
-	 (overlay-start overlay) (overlay-end overlay))
-        (let ((text (overlay-get overlay 'macrostep-original-text)))
-          (goto-char (overlay-start overlay))
-          (macrostep-replace-sexp-at-point text t)))
-      ;; Remove overlay from the list and delete it
-      (setq macrostep-overlays
-	    (delq overlay macrostep-overlays))
-      (delete-overlay overlay)))
+  (with-current-buffer (overlay-buffer overlay)
+    ;; If we're cleaning up we don't need to bother restoring text
+    ;; or checking for inner overlays to delete
+    (unless no-restore-p
+      (let* ((start (overlay-start overlay))
+             (end (overlay-end overlay))
+             (text (overlay-get overlay 'macrostep-original-text))
+             (sexp-end
+              (copy-marker
+               (if (equal (char-before end) ?\n) (1- end) end))))
+        (macrostep-collapse-overlays-in start end)
+        (goto-char (overlay-start overlay))
+        (save-excursion
+          (insert text)
+          (delete-region (point) sexp-end))))
+    ;; Remove overlay from the list and delete it
+    (setq macrostep-overlays
+          (delq overlay macrostep-overlays))
+    (delete-overlay overlay)))
 
 (defun macrostep-collapse-overlays-in (start end)
   "Collapse all macrostepper overlays that are strictly between START and END.
@@ -728,26 +744,6 @@ Will not collapse overlays that begin at START and end at END."
 	     (< (overlay-end ol) end)
 	     (overlay-get ol 'macrostep-original-text))
 	(macrostep-collapse-overlay ol t))))
-
-(defun macrostep-replace-sexp-at-point (sexp &optional verbatim)
-  "Replace the form following point with SEXP.
-
-If VERBATIM is non-nil, SEXP is assumed to be a string
-representing the original source text, and inserted verbatim as a
-replacement for the form following point. Otherwise, SEXP is
-treated as the macro expansion of the source and inserted using
-`macrostep-print-function'."
-  (save-excursion
-    ;; Insert new text first so that existing overlays don't
-    ;; evaporate
-    (if verbatim
-        (insert sexp)                 ; insert original source text
-      (funcall macrostep-print-function sexp))
-    ;; Delete the old form and remove any sub-form overlays in it
-    ;; FIXME: make generic
-    (let ((start (point)) (end (scan-sexps (point) 1)))
-      (macrostep-collapse-overlays-in start end)
-      (delete-region start end))))
 
 (defun macrostep-pp (sexp)
   (let ((print-quoted t))
