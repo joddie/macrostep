@@ -482,7 +482,7 @@ If no more macro expansions are visible after this, exit
   (interactive)
   (let ((overlay (macrostep-overlay-at-point)))
     (when (not overlay) (error "No macro expansion at point"))
-    (let ((buffer-read-only nil))
+    (let ((inhibit-read-only t))
       (with-silent-modifications
         (atomic-change-group
           (macrostep-collapse-overlay overlay)))))
@@ -492,7 +492,7 @@ If no more macro expansions are visible after this, exit
 (defun macrostep-collapse-all ()
   "Collapse all visible macro expansions and exit `macrostep-mode'."
   (interactive)
-  (let ((buffer-read-only nil))
+  (let ((inhibit-read-only t))
     (with-silent-modifications
       (dolist (overlay macrostep-overlays)
         (let ((outermost (= (overlay-get overlay 'priority) 1)))
