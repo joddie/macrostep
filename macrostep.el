@@ -939,8 +939,7 @@ expansion will not be fontified.  See also
       (let ((paren-begin (match-beginning 1)) (paren-end (match-end 1))
             (symbol-begin (match-beginning 2)) (symbol-end (match-end 2)))
         (save-excursion
-          (goto-char (match-beginning 0))
-          (let* ((sexp (slime-sexp-at-point))
+          (let* ((sexp (concat "(" (match-string 2) ")"))  ; FIXME HACK
                  (macro-type (macrostep-slime-macro-form-p sexp)))
             (when macro-type
               (put-text-property paren-begin paren-end
