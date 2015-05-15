@@ -958,7 +958,8 @@ expansion will not be fontified.  See also
       (cl:let ((sexp (cl:read-from-string ,form))
                (expand-compiler-macros ,macrostep-expand-compiler-macros))
         (cl:cond
-          ((cl:not (cl:consp sexp))
+          ((cl:or (cl:not (cl:consp sexp))
+                  (cl:not (cl:symbolp (cl:car sexp))))
            nil)
           ((cl:eq (cl:car sexp) 'cl:lambda)
            nil)
