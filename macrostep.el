@@ -923,38 +923,35 @@ expansion will not be fontified.  See also
   "Insert EXPANSION at point, indenting to match the current column."
   (let* ((indent-string (concat "\n" (make-string (current-column) ? )))
          (expansion (replace-regexp-in-string "\n" indent-string expansion))
-         (end-point))
-    (save-excursion
-      (insert expansion)
-      (setq end-point (point)))
-    (macrostep-slime--propertize-macros)
-    (goto-char end-point)))
+         (start (point)))
+    (insert expansion)
+    (macrostep-slime--propertize-macros start (point))))
 
-(defun macrostep-slime--propertize-macros ()
-  "Put text properties on macros in the form following point."
+(defun macrostep-slime--propertize-macros (start end)
+  "Put text properties on macro forms between START and END."
   (save-excursion
-    (let ((limit (scan-sexps (point) 1)))
-      (while (search-forward-regexp (rx (submatch "(")
-                                        (submatch
-                                         (+ (or (syntax word)
-                                                (syntax symbol)))))
-                                    limit t)
-        (let ((paren-begin (match-beginning 1)) (paren-end (match-end 1))
-              (symbol-begin (match-beginning 2)) (symbol-end (match-end 2)))
-          (save-excursion
-            (goto-char (match-beginning 0))
-            (let* ((sexp (slime-sexp-at-point))
-                   (macro-type (macrostep-slime-macro-form-p sexp)))
-              (when macro-type
-                (put-text-property paren-begin paren-end
-                                   'macrostep-macro-start t)
-                (put-text-property symbol-begin symbol-end
-                                   'font-lock-face
-                                   (cl-ecase macro-type
-                                     (macro
-                                      'macrostep-macro-face)
-                                     (compiler-macro
-                                      'macrostep-compiler-macro-face)))))))))))
+    (goto-char start)
+    (while (search-forward-regexp (rx (submatch "(")
+                                      (submatch
+                                       (+ (or (syntax word)
+                                              (syntax symbol)))))
+                                  end t)
+      (let ((paren-begin (match-beginning 1)) (paren-end (match-end 1))
+            (symbol-begin (match-beginning 2)) (symbol-end (match-end 2)))
+        (save-excursion
+          (goto-char (match-beginning 0))
+          (let* ((sexp (slime-sexp-at-point))
+                 (macro-type (macrostep-slime-macro-form-p sexp)))
+            (when macro-type
+              (put-text-property paren-begin paren-end
+                                 'macrostep-macro-start t)
+              (put-text-property symbol-begin symbol-end
+                                 'font-lock-face
+                                 (cl-ecase macro-type
+                                   (macro
+                                    'macrostep-macro-face)
+                                   (compiler-macro
+                                    'macrostep-compiler-macro-face))))))))))
 
 (defun macrostep-slime-macro-form-p (form)
   (slime-eval
