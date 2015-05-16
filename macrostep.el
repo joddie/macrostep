@@ -912,64 +912,61 @@ expansion will not be fontified.  See also
 ;;;###autoload
 (add-hook 'slime-mode-hook #'macrostep-slime-mode-hook)
 
-(defun macrostep-slime-expand-1 (sexp)
-  (cl-ecase (macrostep-slime-macro-form-p sexp)
-    (macro
-     (slime-eval `(swank:swank-macroexpand-1 ,sexp)))
-    (compiler-macro
-     (slime-eval `(swank:swank-compiler-macroexpand-1 ,sexp)))))
+(defun macrostep-slime-expand-1 (string)
+  (slime-eval `(swank-macrostep:macrostep-expand-1 ,string nil)))
 
-(defun macrostep-slime-insert (expansion)
-  "Insert EXPANSION at point, indenting to match the current column."
-  (let* ((indent-string (concat "\n" (make-string (current-column) ? )))
-         (expansion (replace-regexp-in-string "\n" indent-string expansion))
-         (start (point)))
-    (insert expansion)
-    (macrostep-slime--propertize-macros start (point))))
+(defun macrostep-slime-insert (result)
+  "Insert RESULT at point, indenting to match the current column."
+  (cl-destructuring-bind (expansion substitutions) result
+    (let* ((indent-string (concat "\n" (make-string (current-column) ? )))
+           (expansion (replace-regexp-in-string "\n" indent-string expansion))
+           (start (point)))
+      (insert expansion)
+      (macrostep-slime--propertize-macros start (point) substitutions))))
 
-(defun macrostep-slime--propertize-macros (start end)
+(defun macrostep-slime--propertize-macros (start end substitutions)
   "Put text properties on macro forms between START and END."
-  (save-excursion
-    (goto-char start)
-    (while (search-forward-regexp (rx (submatch "(")
-                                      (submatch
-                                       (+ (or (syntax word)
-                                              (syntax symbol)))))
-                                  end t)
-      (let ((paren-begin (match-beginning 1)) (paren-end (match-end 1))
-            (symbol-begin (match-beginning 2)) (symbol-end (match-end 2)))
-        (save-excursion
-          (let* ((sexp (concat "(" (match-string 2) ")"))  ; FIXME HACK
-                 (macro-type (macrostep-slime-macro-form-p sexp)))
-            (when macro-type
-              (put-text-property paren-begin paren-end
-                                 'macrostep-macro-start t)
-              (put-text-property symbol-begin symbol-end
-                                 'font-lock-face
-                                 (cl-ecase macro-type
-                                   (macro
-                                    'macrostep-macro-face)
-                                   (compiler-macro
-                                    'macrostep-compiler-macro-face))))))))))
+  (when substitutions
+    (let ((regexp
+           (rx-to-string
+            `(: (submatch "(")
+                (submatch
+                 (or ,@(mapcar #'car substitutions)))))))
+      (save-excursion
+        (goto-char start)
+        (while (search-forward-regexp regexp end t)
+          (replace-match (assoc-default (match-string 2) substitutions)
+                         t t nil 2)
+          (put-text-property (match-beginning 1) (match-end 1)
+                             'macrostep-macro-start t)
+          (put-text-property (match-beginning 2) (match-end 2)
+                             'font-lock-face
+                             'macrostep-macro-face))))))
 
-(defun macrostep-slime-macro-form-p (form)
+(defun macrostep-slime-macro-form-p (string)
   (slime-eval
-   `(swank::with-buffer-syntax ()
-      (cl:let ((sexp (cl:read-from-string ,form))
-               (expand-compiler-macros ,macrostep-expand-compiler-macros))
-        (cl:cond
-          ((cl:or (cl:not (cl:consp sexp))
-                  (cl:not (cl:symbolp (cl:car sexp))))
-           nil)
-          ((cl:eq (cl:car sexp) 'cl:lambda)
-           nil)
-          ((cl:macro-function (cl:car sexp))
-           'macro)
-          ((cl:and expand-compiler-macros
-                   (cl:compiler-macro-function (cl:car sexp)))
-           'compiler-macro)
-          (t
-           nil))))))
+   `(swank-macrostep:macro-form-p ,string nil)))
+
+(defun macrostep-slime-environment-at-point ()
+  (save-excursion
+    (condition-case err
+        (progn
+          (backward-up-list)
+          (let ((enclosing-environment
+                 (macrostep-slime-environment-at-point)))
+            (if (looking-at (rx "(macrolet"))
+                (let ((binding-list
+                       (save-excursion
+                         (down-list)
+                         (forward-sexp)
+                         (skip-syntax-forward "-")
+                         (slime-sexp-at-point))))
+                  (cons binding-list enclosing-environment))
+              enclosing-environment)))
+      (scan-error
+       (if macrostep-expansion-buffer
+           macrostep-outer-environment
+         nil)))))
 
 
 (provide 'macrostep)
