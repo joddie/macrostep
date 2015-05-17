@@ -591,7 +591,6 @@ using `load-library' and the macro definition returned as normal.
 If INHIBIT-AUTOLOAD is non-nil, no files will be loaded, and the
 value of DEFINITION in the result will be nil."
   (pcase form
-    (`(lambda . ,_) nil)
     (`(,(and (pred symbolp) head) . ,_)
       (let ((macrolet-definition
              (assoc-default head macrostep-environment 'eq)))
@@ -745,24 +744,51 @@ Will not collapse overlays that begin at START and end at END."
 	     (overlay-get ol 'macrostep-original-text))
 	(macrostep-collapse-overlay ol t))))
 
+(defvar macrostep-collected-macro-forms nil)
+(defvar macrostep-collected-compiler-macro-forms nil)
+
 (defun macrostep-pp (sexp)
-  (let ((print-quoted t))
-    (macrostep-print-sexp sexp)
-    ;; Point is now after the expanded form; pretty-print it
-    (save-restriction
-      (narrow-to-region (scan-sexps (point) -1) (point))
-      (save-excursion
-        (pp-buffer)
-        ;; Remove the extra newline inserted by pp-buffer
-        (goto-char (point-max))
-        (delete-region
-         (point)
-         (save-excursion (skip-chars-backward " \t\n") (point))))
-      ;; Indent the newly-inserted form in context
-      (widen)
-      (save-excursion
-        (backward-list)
-        (indent-sexp)))))
+  (cl-destructuring-bind
+        (macrostep-collected-macro-forms
+         macrostep-collected-compiler-macro-forms)
+      (macrostep-collect-macro-forms sexp)
+    (let ((print-quoted t))
+      (macrostep-print-sexp sexp)
+      ;; Point is now after the expanded form; pretty-print it
+      (save-restriction
+        (narrow-to-region (scan-sexps (point) -1) (point))
+        (save-excursion
+          (pp-buffer)
+          ;; Remove the extra newline inserted by pp-buffer
+          (goto-char (point-max))
+          (delete-region
+           (point)
+           (save-excursion (skip-chars-backward " \t\n") (point))))
+        ;; Indent the newly-inserted form in context
+        (widen)
+        (save-excursion
+          (backward-list)
+          (indent-sexp))))))
+
+(defun macrostep-collect-macro-forms (form)
+  (let ((real-macroexpand (indirect-function #'macroexpand))
+        (macro-forms '())
+        (compiler-macro-forms '()))
+    (cl-letf
+        (((symbol-function #'macroexpand)
+          (lambda (form environment &rest args)
+            (let ((expansion
+                   (apply real-macroexpand form environment args)))
+              (cond ((not (eq expansion form))
+                     (setq macro-forms (cons form macro-forms)))
+                    ((and (consp form)
+                          (symbolp (car form))
+                          (get (car form) 'compiler-macro))
+                     (setq compiler-macro-forms
+                           (cons form compiler-macro-forms))))
+              expansion))))
+      (macroexpand-all form))
+    (list macro-forms compiler-macro-forms)))
 
 (defun macrostep-get-gensym-face (symbol)
   "Return the face to use in fontifying SYMBOL in printed macro expansions.
@@ -791,16 +817,14 @@ fontified using the same face (modulo the number of faces; see
                  collect `(put-text-property ,start (point)
                                              ,key ,value))))))
 
-(defun macrostep-print-sexp (sexp &optional quoted-form-p)
+(defun macrostep-print-sexp (sexp)
   "Pretty-print SEXP, a macro expansion, in the current buffer.
 
 Fontifies uninterned symbols and macro forms using
 `font-lock-face' property, and saves the actual text of SEXP's
 sub-forms as the `macrostep-expanded-text' text property so that
 any uninterned symbols can be reused in macro expansions of the
-sub-forms.  If QUOTED-FORM-P is non-nil then any macros in the
-expansion will not be fontified.  See also
-`macrostep-sexp-at-point'."
+sub-forms.  See also `macrostep-sexp-at-point'."
   (cond
    ((symbolp sexp)
     ;; Fontify gensyms
@@ -817,17 +841,18 @@ expansion will not be fontified.  See also
       (cond ((and (eq head 'quote)	; quote
 		  (= (length sexp) 2))
 	     (insert "'")
-	     (macrostep-print-sexp (cadr sexp) t))
+	     (macrostep-print-sexp (cadr sexp)))
 
             ((and (eq head '\`)         ; backquote
                   (= (length sexp) 2))
-             ;; Treat backquote as a macro
-             (macrostep-propertize
-                 (insert "`")
-               'macrostep-expanded-text sexp
-               'macrostep-macro-start t
-               'font-lock-face 'macrostep-macro-face)
-             (macrostep-print-sexp (cadr sexp) t))
+             (if (memq sexp macrostep-collected-macro-forms)
+                 (macrostep-propertize
+                     (insert "`")
+                   'macrostep-expanded-text sexp
+                   'macrostep-macro-start t
+                   'font-lock-face 'macrostep-macro-face)
+               (insert "`"))
+             (macrostep-print-sexp (cadr sexp)))
 
 	    ((and (memq head '(\, \,@)) ; unquote
 		  (= (length sexp) 2))
@@ -848,26 +873,29 @@ expansion will not be fontified.  See also
                                 macrostep-environment))
                       (_ macrostep-environment))))
                
-               ;; Is it an (unquoted) macro form?
-               (if (and (not quoted-form-p)
-                        (macrostep-macro-form-p sexp))
-                   (progn
-                     ;; Save the real expansion as a text property on the
-                     ;; opening paren
-                     (macrostep-propertize
-                         (insert "(")
-                       'macrostep-macro-start t
-                       'macrostep-expanded-text sexp)
-                     ;; Fontify the head of the macro
-                     (macrostep-propertize
-                         (macrostep-print-sexp head)
-                       'font-lock-face
-                       (pcase (macrostep-macro-form-p sexp)
-                         (`macro 'macrostep-macro-face)
-                         (`compiler-macro 'macrostep-compiler-macro-face))))
-                 ;; Not a macro form
-                 (insert "(")
-                 (macrostep-print-sexp head quoted-form-p))
+               ;; Is it a macro form?
+               (let ((macro?
+                      (memq sexp macrostep-collected-macro-forms))
+                     (compiler-macro?
+                      (memq sexp macrostep-collected-compiler-macro-forms)))
+                 (if (or macro? compiler-macro?)
+                     (progn
+                       ;; Save the real expansion as a text property on the
+                       ;; opening paren
+                       (macrostep-propertize
+                           (insert "(")
+                         'macrostep-macro-start t
+                         'macrostep-expanded-text sexp)
+                       ;; Fontify the head of the macro
+                       (macrostep-propertize
+                           (macrostep-print-sexp head)
+                         'font-lock-face
+                         (if macro?
+                             'macrostep-macro-face
+                           'macrostep-compiler-macro-face)))
+                   ;; Not a macro form
+                   (insert "(")
+                   (macrostep-print-sexp head)))
 
                ;; Print remaining list elements
                (setq sexp (cdr sexp))
@@ -879,7 +907,7 @@ expansion will not be fontified.  See also
                  (while sexp
                    (if (listp sexp)
                        (progn
-                         (macrostep-print-sexp (car sexp) quoted-form-p)
+                         (macrostep-print-sexp (car sexp))
                          (when (cdr sexp) (insert " "))
                          (setq sexp (cdr sexp))
                          ;; At this point the first and second

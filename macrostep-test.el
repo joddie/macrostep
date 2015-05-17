@@ -183,18 +183,19 @@
     (should-print '`(backquoted (form) ,with ,@splices)
                   "`(backquoted (form) ,with ,@splices)")))
 
-(ert-deftest macrostep-print-sexp-macrolet-environment ()
+(ert-deftest macrostep-pp-macrolet-environment ()
   (with-temp-buffer
     (emacs-lisp-mode)
     (save-excursion
-      (macrostep-print-sexp
+      (macrostep-pp
        '(macrolet ((some-macro (&rest forms) (cons 'progn forms)))
          (some-macro with (arguments))
          (intervening body forms)
          (some-macro with (more) (arguments))))
       (cl-flet ((search (text)
                   (goto-char (point-min))
-                  (search-forward text)
+                  (let ((search-whitespace-regexp "[[:space:]\n]+"))
+                    (search-forward-lax-whitespace text))
                   (goto-char (match-beginning 0))
                   ;; Leave point on the head of the form
                   (forward-char)))
