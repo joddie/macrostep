@@ -639,25 +639,47 @@ or `cl-macrolet' forms surrounding point.
 The return value is an alist of elements (NAME . FUNCTION), where
 NAME is the symbol locally bound to the macro and FUNCTION is the
 lambda expression that returns its expansion."
-  (save-excursion
-    (let
-        ((enclosing-form
-          (ignore-errors
-            (backward-up-list)
-            (read (copy-marker (point))))))
-      (pcase enclosing-form
-        (`(,(or `macrolet `cl-macrolet) ,bindings . ,_)
-          (let ((binding-environment
-                 (macrostep-bindings-to-environment bindings))
-                (enclosing-environment
-                 (macrostep-environment-at-point)))
-            (append binding-environment enclosing-environment)))
-        (`nil
-         (if macrostep-expansion-buffer
-             macrostep-outer-environment
-           nil))
-        (_
-         (macrostep-environment-at-point))))))
+  (let ((saved-environment
+         (get-text-property (point) 'macrostep-environment)))
+    (if saved-environment
+        saved-environment
+      (cl-flet ((move-backward ()
+                  (condition-case nil
+                      (backward-sexp)
+                    (scan-error (backward-up-list)))))
+        (save-excursion
+          (catch 'done
+            (while t
+              (condition-case nil
+                  (throw 'done (macrostep-environment-at-point-1))
+                (error (move-backward))))))))))
+
+(defun macrostep-environment-at-point-1 ()
+  (let* ((top-level
+          (save-excursion
+            (while (ignore-errors (backward-up-list) t))
+            (point)))
+         (enclosing-form
+          (buffer-substring top-level
+                            (scan-sexps top-level 1)))
+         (position (- (point) top-level))
+         (tag (make-symbol "macrostep-grab-environment-tag"))
+         (grab-environment '--macrostep-grab-environment--))
+    (if (= position 0)
+        nil
+      (with-temp-buffer
+        (emacs-lisp-mode)
+        (insert enclosing-form)
+        (goto-char (+ (point-min) position))
+        (prin1 `(,grab-environment) (current-buffer))
+        (let ((form (read (copy-marker (point-min)))))
+          (catch tag
+            (ignore-errors
+              (macroexpand-all
+               `(cl-macrolet ((,grab-environment (&environment env)
+                                (throw ',tag env)))
+                  ,form)))
+            (error "macrostep-environment-at-point failed")))))))
 
 (defun macrostep-bindings-to-environment (bindings)
   "Return the macro-expansion environment declared by BINDINGS as an alist.
@@ -744,12 +766,12 @@ Will not collapse overlays that begin at START and end at END."
 	     (overlay-get ol 'macrostep-original-text))
 	(macrostep-collapse-overlay ol t))))
 
-(defvar macrostep-collected-macro-forms nil)
+(defvar macrostep-collected-macro-form-alist nil)
 (defvar macrostep-collected-compiler-macro-forms nil)
 
 (defun macrostep-pp (sexp)
   (cl-destructuring-bind
-        (macrostep-collected-macro-forms
+        (macrostep-collected-macro-form-alist
          macrostep-collected-compiler-macro-forms)
       (macrostep-collect-macro-forms sexp)
     (let ((print-quoted t))
@@ -772,7 +794,7 @@ Will not collapse overlays that begin at START and end at END."
 
 (defun macrostep-collect-macro-forms (form)
   (let ((real-macroexpand (indirect-function #'macroexpand))
-        (macro-forms '())
+        (macro-form-alist '())
         (compiler-macro-forms '()))
     (cl-letf
         (((symbol-function #'macroexpand)
@@ -780,15 +802,18 @@ Will not collapse overlays that begin at START and end at END."
             (let ((expansion
                    (apply real-macroexpand form environment args)))
               (cond ((not (eq expansion form))
-                     (setq macro-forms (cons form macro-forms)))
+                     (setq macro-form-alist
+                           (cons (cons form environment)
+                                 macro-form-alist)))
                     ((and (consp form)
                           (symbolp (car form))
                           (get (car form) 'compiler-macro))
                      (setq compiler-macro-forms
                            (cons form compiler-macro-forms))))
               expansion))))
-      (macroexpand-all form))
-    (list macro-forms compiler-macro-forms)))
+      (ignore-errors
+        (macroexpand-all form)))
+    (list macro-form-alist compiler-macro-forms)))
 
 (defun macrostep-get-gensym-face (symbol)
   "Return the face to use in fontifying SYMBOL in printed macro expansions.
@@ -845,7 +870,7 @@ sub-forms.  See also `macrostep-sexp-at-point'."
 
             ((and (eq head '\`)         ; backquote
                   (= (length sexp) 2))
-             (if (memq sexp macrostep-collected-macro-forms)
+             (if (assq sexp macrostep-collected-macro-form-alist)
                  (macrostep-propertize
                      (insert "`")
                    'macrostep-expanded-text sexp
@@ -860,67 +885,45 @@ sub-forms.  See also `macrostep-sexp-at-point'."
 	     (macrostep-print-sexp (cadr sexp)))
 
 	    (t				; other list form
-             ;; If the sexp is a (cl-)macrolet form, the
-             ;; macro-expansion environment should be extended using
-             ;; its bindings while printing the body forms in order to
-             ;; correctly mark any uses of locally-bound macros. (See
-             ;; `with-js' in `js.el.gz' for an example of a macro that
-             ;; works this way).
-             (let ((extended-environment
-                    (pcase sexp
-                      (`(,(or `cl-macrolet `macrolet) ,bindings . ,_)
-                        (append (macrostep-bindings-to-environment bindings)
-                                macrostep-environment))
-                      (_ macrostep-environment))))
-               
-               ;; Is it a macro form?
-               (let ((macro?
-                      (memq sexp macrostep-collected-macro-forms))
-                     (compiler-macro?
-                      (memq sexp macrostep-collected-compiler-macro-forms)))
-                 (if (or macro? compiler-macro?)
-                     (progn
-                       ;; Save the real expansion as a text property on the
-                       ;; opening paren
-                       (macrostep-propertize
-                           (insert "(")
-                         'macrostep-macro-start t
-                         'macrostep-expanded-text sexp)
-                       ;; Fontify the head of the macro
-                       (macrostep-propertize
-                           (macrostep-print-sexp head)
-                         'font-lock-face
-                         (if macro?
-                             'macrostep-macro-face
-                           'macrostep-compiler-macro-face)))
-                   ;; Not a macro form
-                   (insert "(")
-                   (macrostep-print-sexp head)))
+             (pcase-let
+                 ((`(,macro? . ,environment)
+                    (assq sexp macrostep-collected-macro-form-alist))
+                  (compiler-macro?
+                   (memq sexp macrostep-collected-compiler-macro-forms)))
+               (if (or macro? compiler-macro?)
+                   (progn
+                     ;; Save the real expansion as a text property on the
+                     ;; opening paren
+                     (macrostep-propertize
+                         (insert "(")
+                       'macrostep-macro-start t
+                       'macrostep-expanded-text sexp
+                       'macrostep-environment environment)
+                     ;; Fontify the head of the macro
+                     (macrostep-propertize
+                         (macrostep-print-sexp head)
+                       'font-lock-face
+                       (if macro?
+                           'macrostep-macro-face
+                         'macrostep-compiler-macro-face)))
+                 ;; Not a macro form
+                 (insert "(")
+                 (macrostep-print-sexp head)))
 
-               ;; Print remaining list elements
-               (setq sexp (cdr sexp))
-               (when sexp (insert " "))
-               ;; macrostep-environment will be setq'd after printing
-               ;; the second element of the list (i.e., the binding
-               ;; list in a macrolet form)
-               (let ((macrostep-environment macrostep-environment))
-                 (while sexp
-                   (if (listp sexp)
-                       (progn
-                         (macrostep-print-sexp (car sexp))
-                         (when (cdr sexp) (insert " "))
-                         (setq sexp (cdr sexp))
-                         ;; At this point the first and second
-                         ;; elements of the list have been printed, so
-                         ;; it is time to extend the macro-expansion
-                         ;; environment inside a macrolet for the body
-                         ;; forms.
-                         (setq macrostep-environment extended-environment))
-                     ;; Print tail of dotted list
-                     (insert ". ")
-                     (macrostep-print-sexp sexp)
-                     (setq sexp nil))))
-               (insert ")"))))))
+             ;; Print remaining list elements
+             (setq sexp (cdr sexp))
+             (when sexp (insert " "))
+             (while sexp
+               (if (listp sexp)
+                   (progn
+                     (macrostep-print-sexp (car sexp))
+                     (when (cdr sexp) (insert " "))
+                     (setq sexp (cdr sexp)))
+                 ;; Print tail of dotted list
+                 (insert ". ")
+                 (macrostep-print-sexp sexp)
+                 (setq sexp nil)))
+             (insert ")")))))
 
    ;; Print everything except symbols and lists as normal
    (t (prin1 sexp (current-buffer)))))
