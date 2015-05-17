@@ -913,7 +913,9 @@ expansion will not be fontified.  See also
 (add-hook 'slime-mode-hook #'macrostep-slime-mode-hook)
 
 (defun macrostep-slime-expand-1 (string)
-  (slime-eval `(swank-macrostep:macrostep-expand-1 ,string nil)))
+  (slime-eval
+   `(swank-macrostep:macrostep-expand-1
+     ,string nil ,macrostep-expand-compiler-macros)))
 
 (defun macrostep-slime-insert (result)
   "Insert RESULT at point, indenting to match the current column."
@@ -935,17 +937,23 @@ expansion will not be fontified.  See also
       (save-excursion
         (goto-char start)
         (while (search-forward-regexp regexp end t)
-          (replace-match (assoc-default (match-string 2) substitutions)
-                         t t nil 2)
-          (put-text-property (match-beginning 1) (match-end 1)
-                             'macrostep-macro-start t)
-          (put-text-property (match-beginning 2) (match-end 2)
-                             'font-lock-face
-                             'macrostep-macro-face))))))
+          (pcase (assoc (match-string 2) substitutions)
+            (`(,_ ,original-symbol ,type)
+              (setq end (+ end (- (length original-symbol)
+                                  (length (match-string 2)))))
+              (replace-match original-symbol t t nil 2)
+              (put-text-property (match-beginning 1) (match-end 1)
+                                 'macrostep-macro-start t)
+              (put-text-property (match-beginning 2) (match-end 2)
+                                 'font-lock-face
+                                 (if (eq type :macro)
+                                     'macrostep-macro-face
+                                   'macrostep-compiler-macro-face)))))))))
 
 (defun macrostep-slime-macro-form-p (string)
   (slime-eval
-   `(swank-macrostep:macro-form-p ,string nil)))
+   `(swank-macrostep:macro-form-p
+     ,string nil ,macrostep-expand-compiler-macros)))
 
 (defun macrostep-slime-environment-at-point ()
   (save-excursion
