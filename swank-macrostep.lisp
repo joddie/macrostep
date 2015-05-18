@@ -75,23 +75,39 @@
       (collect-macro-forms form)
     (substitute-macro-forms form macro-forms compiler-macro-forms)))
 
-(defun collect-macro-forms (form)
-  (let* ((real-macroexpand-hook *macroexpand-hook*)
-         (macro-forms '())
-         (*macroexpand-hook*
-          (lambda (macro-function form environment)
-            (setq macro-forms
-                  (cons form macro-forms))
-            (funcall real-macroexpand-hook macro-function form environment)))
-         (expansion (ignore-errors (macroexpand-all form)))
-         (compiler-macro-forms '())
-         (*macroexpand-hook*
-          (lambda (macro-function form environment)
-            (setq compiler-macro-forms
-                  (cons form compiler-macro-forms))
-            (funcall real-macroexpand-hook macro-function form environment))))
-    (ignore-errors
-      (compile nil `(lambda () ,expansion)))
+#-sbcl
+(defun collect-macro-forms (form &optional environment)
+  (let ((real-macroexpand-hook *macroexpand-hook*))
+    (macrolet ((make-form-collector (variable)
+                 `(lambda (macro-function form environment)
+                    (setq ,variable (cons form ,variable))
+                    (funcall real-macroexpand-hook
+                             macro-function form environment))))
+      (let* ((macro-forms '())
+             (compiler-macro-forms '())
+             (*macroexpand-hook* (make-form-collector macro-forms))
+             (expansion (ignore-errors (macroexpand-all form)))
+             (*macroexpand-hook* (make-form-collector compiler-macro-forms)))
+        (handler-bind ((warning #'muffle-warning))
+          (ignore-errors
+            (compile nil `(lambda () ,expansion))))
+        (values macro-forms compiler-macro-forms)))))
+
+#+sbcl
+(defun collect-macro-forms (form &optional environment)
+  (let ((macro-forms '())
+        (compiler-macro-forms '()))
+    (sb-walker:walk-form
+     form environment
+     (lambda (form context environment)
+       (declare (ignore context))
+       (when (and (consp form)
+                  (symbolp (car form)))
+         (cond ((macro-function (car form) environment)
+                (push form macro-forms))
+               ((compiler-macro-function (car form) environment)
+                (push form compiler-macro-forms))))
+       form))
     (values macro-forms compiler-macro-forms)))
 
 (defun substitute-macro-forms (form macro-forms compiler-macro-forms)
