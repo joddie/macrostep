@@ -674,11 +674,13 @@ lambda expression that returns its expansion."
         (prin1 `(,grab-environment) (current-buffer))
         (let ((form (read (copy-marker (point-min)))))
           (catch tag
-            (ignore-errors
-              (macroexpand-all
-               `(cl-macrolet ((,grab-environment (&environment env)
-                                (throw ',tag env)))
-                  ,form)))
+            (cl-letf (((symbol-function #'message) (symbol-function #'format)))
+              (with-no-warnings
+                (ignore-errors
+                  (macroexpand-all
+                   `(cl-macrolet ((,grab-environment (&environment env)
+                                    (throw ',tag env)))
+                      ,form)))))
             (error "macrostep-environment-at-point failed")))))))
 
 (defun macrostep-bindings-to-environment (bindings)
@@ -773,7 +775,7 @@ Will not collapse overlays that begin at START and end at END."
   (cl-destructuring-bind
         (macrostep-collected-macro-form-alist
          macrostep-collected-compiler-macro-forms)
-      (macrostep-collect-macro-forms sexp)
+      (macrostep-collect-macro-forms sexp macrostep-environment)
     (let ((print-quoted t))
       (macrostep-print-sexp sexp)
       ;; Point is now after the expanded form; pretty-print it
@@ -792,7 +794,7 @@ Will not collapse overlays that begin at START and end at END."
           (backward-list)
           (indent-sexp))))))
 
-(defun macrostep-collect-macro-forms (form)
+(defun macrostep-collect-macro-forms (form &optional environment)
   (let ((real-macroexpand (indirect-function #'macroexpand))
         (macro-form-alist '())
         (compiler-macro-forms '()))
@@ -812,7 +814,7 @@ Will not collapse overlays that begin at START and end at END."
                            (cons form compiler-macro-forms))))
               expansion))))
       (ignore-errors
-        (macroexpand-all form)))
+        (macroexpand-all form environment)))
     (list macro-form-alist compiler-macro-forms)))
 
 (defun macrostep-get-gensym-face (symbol)
