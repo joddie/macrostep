@@ -140,3 +140,5 @@
                        (cons car cdr)
                        (append replacements-1 replacements-2)))))))))
     (recur form)))
+
+(provide :swank-macrostep)
