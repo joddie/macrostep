@@ -952,36 +952,28 @@ sub-forms.  See also `macrostep-sexp-at-point'."
 
 (defun macrostep-slime-insert (result)
   "Insert RESULT at point, indenting to match the current column."
-  (cl-destructuring-bind (expansion substitutions) result
+  (cl-destructuring-bind (expansion positions) result
     (let* ((indent-string (concat "\n" (make-string (current-column) ? )))
            (expansion (replace-regexp-in-string "\n" indent-string expansion))
-           (start (point)))
+           (start (point))
+           (column-offset (current-column)))
       (insert expansion)
-      (macrostep-slime--propertize-macros start (point) substitutions))))
+      (macrostep-slime--propertize-macros start column-offset positions))))
 
-(defun macrostep-slime--propertize-macros (start end substitutions)
-  "Put text properties on macro forms between START and END."
-  (when substitutions
-    (let ((regexp
-           (rx-to-string
-            `(: (submatch "(")
-                (submatch
-                 (or ,@(mapcar #'car substitutions)))))))
-      (save-excursion
-        (goto-char start)
-        (while (search-forward-regexp regexp end t)
-          (pcase (assoc (match-string 2) substitutions)
-            (`(,_ ,original-symbol ,type)
-              (setq end (+ end (- (length original-symbol)
-                                  (length (match-string 2)))))
-              (replace-match original-symbol t t nil 2)
-              (put-text-property (match-beginning 1) (match-end 1)
-                                 'macrostep-macro-start t)
-              (put-text-property (match-beginning 2) (match-end 2)
-                                 'font-lock-face
-                                 (if (eq type :macro)
-                                     'macrostep-macro-face
-                                   'macrostep-compiler-macro-face)))))))))
+(defun macrostep-slime--propertize-macros (start-offset column-offset positions)
+  "Put text properties on macro forms."
+  (dolist (position positions)
+    (destructuring-bind (type start start-line op-end op-end-line end end-line)
+        position
+      (put-text-property (+ start-offset start (* column-offset start-line))
+                         (+ start-offset end (* column-offset end-line))
+                         'macrostep-macro-start t)
+      (put-text-property (+ 1 start-offset start (* column-offset start-line))
+                         (+ 1 start-offset op-end (* column-offset op-end-line))
+                         'font-lock-face
+                         (if (eq type :macro)
+                             'macrostep-macro-face
+                             'macrostep-compiler-macro-face)))))
 
 (defun macrostep-slime-macro-form-p (string)
   (slime-eval

@@ -27,15 +27,30 @@
                       (compiler-macroexpand-1 form env)
                     (if expanded?
                         expansion
-                      (error "Not a macro or compiler-macro form."))))))))
-      (multiple-value-bind (result substitutions)
-          (substitute-macros expansion)
-        (list
-         (to-string result)
-         (loop for (gensym original type) in substitutions
-            collect (list (to-string gensym)
-                          (to-string original)
-                          type)))))))
+                        (error "Not a macro or compiler-macro form.")))))))
+           (pretty-expansion (to-string expansion)))
+      (list pretty-expansion
+            (multiple-value-bind (expansion* tracking-stream)
+                (tracking-read-from-string pretty-expansion)
+              (multiple-value-bind (macros compiler-macros)
+                  (collect-macro-forms expansion*)
+                (flet ((collect-positions (forms type)
+                         (mapcar (lambda (form)
+                                   (destructuring-bind (start end)
+                                       (cdr (assoc form (forms-of tracking-stream)))
+                                     ;; this assumes that the operator
+                                     ;; starts right next to the opening
+                                     ;; parenthesis. I guess we could be
+                                     ;; more forgiving with some
+                                     ;; cleverness on the Emacs side.
+                                     (let ((op-end (+ start (length (to-string (first form))))))
+                                       (list type
+                                             start (position-line start tracking-stream)
+                                             op-end (position-line op-end tracking-stream)
+                                             end (position-line end tracking-stream)))))
+                                 forms)))
+                  (append (collect-positions macros :macro)
+                          (collect-positions compiler-macros :compiler-macro)))))))))
 
 (defun macro-form-p (string binding-strings &optional compiler-macros?)
   (with-buffer-syntax ()
@@ -69,11 +84,6 @@
     (let ((binding-list (car binding-lists))
           (subexpression (make-environment-extractor (cdr binding-lists))))
       `(macrolet ,binding-list ,subexpression))))
-
-(defun substitute-macros (form)
-  (multiple-value-bind (macro-forms compiler-macro-forms)
-      (collect-macro-forms form)
-    (substitute-macro-forms form macro-forms compiler-macro-forms)))
 
 #-sbcl
 (defun collect-macro-forms (form &optional environment)
@@ -110,35 +120,74 @@
        form))
     (values macro-forms compiler-macro-forms)))
 
-(defun substitute-macro-forms (form macro-forms compiler-macro-forms)
-  (labels
-      ((macro-form? (form)
-         (member form macro-forms :test 'eq))
-       (compiler-macro-form? (form)
-         (member form compiler-macro-forms :test 'eq))
-       (recur (form)
-         (let (macro? compiler-macro?)
-           (cond ((not (consp form))
-                  (values form nil))
-                 ((or
-                   (setf macro? (macro-form? form))
-                   (setf compiler-macro? (compiler-macro-form? form)))
-                  (multiple-value-bind (rest replacements)
-                      (recur (cdr form))
-                    (let ((replacement (gensym)))
-                      (values
-                       (cons replacement rest)
-                       (cons (list replacement (car form)
-                                   (if macro? :macro :compiler-macro))
-                             replacements)))))
-                 (t
-                  (multiple-value-bind (car replacements-1)
-                      (recur (car form))
-                    (multiple-value-bind (cdr replacements-2)
-                        (recur (cdr form))
-                      (values
-                       (cons car cdr)
-                       (append replacements-1 replacements-2)))))))))
-    (recur form)))
+;;;; FORM-TRACKING-STREAM
+
+(defclass form-tracking-stream (swank/gray:fundamental-character-input-stream)
+  (;; The underlying stream.
+   (source :initarg :source :accessor source-of)
+   (position :initform 0 :accessor position-of)
+   ;; Track the position of each #\Newline that occurred so that, if
+   ;; desired, a line/column can be calculated for any position.
+   (newlines :initform (make-array 10 :adjustable t :fill-pointer 0)
+             :accessor newlines-of)
+   (forms :initform nil :accessor forms-of)))
+
+(defmethod swank/gray:stream-read-char ((stream form-tracking-stream))
+  (handler-case
+      (let ((pos (position-of stream))
+            (result (read-char (source-of stream))))
+        (incf (position-of stream))
+        (when (eql result #\Newline)
+          (let* ((newlines (newlines-of stream))
+                 (n (length newlines)))
+            (when (or (zerop n) (> pos (aref newlines (1- n))))
+              (vector-push-extend pos newlines))))
+        result)
+    (end-of-file () :eof)))
+
+(defmethod swank/gray:stream-unread-char ((stream form-tracking-stream) character)
+  (prog1 (unread-char character (source-of stream))
+    (decf (position-of stream))))
+
+(defun annotate-position (stream object start)
+  (push (list object start (position-of stream))
+        (forms-of stream)))
+
+(defun form-tracking-stream-p (stream)
+  (typep stream 'form-tracking-stream))
+
+(defun line-and-column (position tracking-stream)
+  (let* ((line (or (position-if (lambda (newline-pos)
+                                  (> newline-pos position))
+                                (newlines-of tracking-stream))
+                   1))
+         (column (if (eql line 1)
+                     position
+                     (- position (aref (newlines-of tracking-stream) (1- line))))))
+    (values line column)))
+
+(defun position-line (position tracking-stream)
+  (nth-value 0 (line-and-column position tracking-stream)))
+
+(defun tracking-read-from-string (string &key (readtable *readtable*))
+  (with-input-from-string (string-stream string)
+    (let ((instrumented-readtable (copy-readtable readtable))
+          (tracking-stream (make-instance 'form-tracking-stream
+                                          :source string-stream)))
+      ;; we could do this for every readtable char, using
+      ;; named-readtables::do-readtable, but for our purposes here,
+      ;; #\( suffices.
+      (multiple-value-bind (fn non-terminating-p)
+          (get-macro-character #\( readtable)
+        (set-macro-character #\(
+                             (lambda (&rest args)
+                               (let ((start (1- (position-of tracking-stream)))
+                                     (object (apply fn args)))
+                                 (annotate-position tracking-stream object start)
+                                 object))
+                             non-terminating-p
+                             instrumented-readtable))
+      (let ((*readtable* instrumented-readtable))
+        (values (read tracking-stream) tracking-stream)))))
 
 (provide :swank-macrostep)
