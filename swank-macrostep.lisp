@@ -17,17 +17,17 @@
            (bindings (mapcar #'read-from-string binding-strings))
            (env (compute-environment bindings))
            (expansion
-            (multiple-value-bind (expansion expanded?)
-                (macroexpand-1 form env)
-              (if expanded?
-                  expansion
-                (if (not compiler-macros?)
-                    (error "Not a macro form.")
-                  (multiple-value-bind (expansion expanded?)
-                      (compiler-macroexpand-1 form env)
-                    (if expanded?
-                        expansion
-                        (error "Not a macro or compiler-macro form.")))))))
+             (multiple-value-bind (expansion expanded?)
+                 (macroexpand-1 form env)
+               (if expanded?
+                   expansion
+                   (if (not compiler-macros?)
+                       (error "Not a macro form.")
+                       (multiple-value-bind (expansion expanded?)
+                           (compiler-macroexpand-1 form env)
+                         (if expanded?
+                             expansion
+                             (error "Not a macro or compiler-macro form.")))))))
            (pretty-expansion (to-string expansion)))
       (list pretty-expansion
             (multiple-value-bind (expansion* tracking-stream)
@@ -35,20 +35,21 @@
               (multiple-value-bind (macros compiler-macros)
                   (collect-macro-forms expansion*)
                 (flet ((collect-positions (forms type)
-                         (mapcar (lambda (form)
-                                   (destructuring-bind (start end)
-                                       (cdr (assoc form (forms-of tracking-stream)))
-                                     ;; this assumes that the operator
-                                     ;; starts right next to the opening
-                                     ;; parenthesis. I guess we could be
-                                     ;; more forgiving with some
-                                     ;; cleverness on the Emacs side.
-                                     (let ((op-end (+ start (length (to-string (first form))))))
-                                       (list type
-                                             start (position-line start tracking-stream)
-                                             op-end (position-line op-end tracking-stream)
-                                             end (position-line end tracking-stream)))))
-                                 forms)))
+                         (loop for form in forms
+                               for bounds = (cdr (assoc form (forms-of tracking-stream)))
+                               when bounds
+                                 collect (destructuring-bind (start end)
+                                             bounds
+                                           ;; this assumes that the operator
+                                           ;; starts right next to the opening
+                                           ;; parenthesis. I guess we could be
+                                           ;; more forgiving with some
+                                           ;; cleverness on the Emacs side.
+                                           (let ((op-end (+ start (length (to-string (first form))))))
+                                             (list type
+                                                   start (position-line start tracking-stream)
+                                                   op-end (position-line op-end tracking-stream)
+                                                   end (position-line end tracking-stream)))))))
                   (append (collect-positions macros :macro)
                           (collect-positions compiler-macros :compiler-macro)))))))))
 
@@ -156,18 +157,11 @@
 (defun form-tracking-stream-p (stream)
   (typep stream 'form-tracking-stream))
 
-(defun line-and-column (position tracking-stream)
-  (let* ((line (or (position-if (lambda (newline-pos)
-                                  (> newline-pos position))
-                                (newlines-of tracking-stream))
-                   1))
-         (column (if (eql line 1)
-                     position
-                     (- position (aref (newlines-of tracking-stream) (1- line))))))
-    (values line column)))
-
 (defun position-line (position tracking-stream)
-  (nth-value 0 (line-and-column position tracking-stream)))
+  (or (position-if (lambda (newline-pos)
+                     (> newline-pos position))
+                   (newlines-of tracking-stream))
+      (length (newlines-of tracking-stream))))
 
 (defun tracking-read-from-string (string &key (readtable *readtable*))
   (with-input-from-string (string-stream string)
