@@ -945,6 +945,9 @@ sub-forms.  See also `macrostep-sexp-at-point'."
 ;;;###autoload
 (add-hook 'slime-mode-hook #'macrostep-slime-mode-hook)
 
+;;;###autoload
+(add-hook 'slime-repl-mode-hook #'macrostep-slime-mode-hook)
+
 (defun macrostep-slime-expand-1 (string)
   (slime-eval
    `(swank-macrostep:macrostep-expand-1
