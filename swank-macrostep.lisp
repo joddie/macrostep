@@ -2,7 +2,9 @@
 (defpackage swank-macrostep
   (:use cl swank)
   (:import-from swank
+		#:*macroexpand-printer-bindings*
                 #:with-buffer-syntax
+		#:with-bindings
                 #:to-string
                 #:macroexpand-all
                 #:compiler-macroexpand-1)
@@ -28,7 +30,8 @@
                          (if expanded?
                              expansion
                              (error "Not a macro or compiler-macro form.")))))))
-           (pretty-expansion (to-string expansion)))
+           (pretty-expansion (with-bindings *macroexpand-printer-bindings*
+			       (to-string expansion))))
       (list pretty-expansion
             (multiple-value-bind (expansion* tracking-stream)
                 (tracking-read-from-string pretty-expansion)
