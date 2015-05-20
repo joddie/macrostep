@@ -136,18 +136,25 @@
              :accessor newlines-of)
    (forms :initform nil :accessor forms-of)))
 
-(defmethod swank/gray:stream-read-char ((stream form-tracking-stream))
+(defun %read-char (reader stream)
   (handler-case
       (let ((pos (position-of stream))
-            (result (read-char (source-of stream))))
-        (incf (position-of stream))
-        (when (eql result #\Newline)
-          (let* ((newlines (newlines-of stream))
-                 (n (length newlines)))
-            (when (or (zerop n) (> pos (aref newlines (1- n))))
-              (vector-push-extend pos newlines))))
-        result)
+            (result (funcall reader (source-of stream))))
+        (when result
+	  (incf (position-of stream))
+	  (when (eql result #\Newline)
+	    (let* ((newlines (newlines-of stream))
+		   (n (length newlines)))
+	      (when (or (zerop n) (> pos (aref newlines (1- n))))
+		(vector-push-extend pos newlines))))
+	  result))
     (end-of-file () :eof)))
+
+(defmethod swank/gray:stream-read-char ((stream form-tracking-stream))
+  (%read-char #'read-char stream))
+
+(defmethod swank/gray:stream-read-char-no-hang ((stream form-tracking-stream))
+  (%read-char #'read-char-no-hang stream))
 
 (defmethod swank/gray:stream-unread-char ((stream form-tracking-stream) character)
   (prog1 (unread-char character (source-of stream))
