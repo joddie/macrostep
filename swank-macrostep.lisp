@@ -13,6 +13,11 @@
 
 (in-package #:swank-macrostep)
 
+(defun pprint-to-string (object &optional pprint-dispatch)
+  (let ((*print-pprint-dispatch* (or pprint-dispatch *print-pprint-dispatch*)))
+    (with-bindings *macroexpand-printer-bindings*
+      (to-string object))))
+
 (defun macrostep-expand-1 (string binding-strings &optional compiler-macros?)
   (with-buffer-syntax ()
     (let* ((form (read-from-string string))
@@ -30,31 +35,35 @@
                          (if expanded?
                              expansion
                              (error "Not a macro or compiler-macro form.")))))))
-           (pretty-expansion (with-bindings *macroexpand-printer-bindings*
-			       (to-string expansion))))
-      (list pretty-expansion
-            (multiple-value-bind (expansion* tracking-stream)
-                (tracking-read-from-string pretty-expansion)
-              (multiple-value-bind (macros compiler-macros)
-                  (collect-macro-forms expansion*)
-                (flet ((collect-positions (forms type)
-                         (loop for form in forms
-                               for bounds = (cdr (assoc form (forms-of tracking-stream)))
-                               when bounds
-                                 collect (destructuring-bind (start end)
-                                             bounds
-                                           ;; this assumes that the operator
-                                           ;; starts right next to the opening
-                                           ;; parenthesis. I guess we could be
-                                           ;; more forgiving with some
-                                           ;; cleverness on the Emacs side.
-                                           (let ((op-end (+ start (length (to-string (first form))))))
-                                             (list type
-                                                   start (position-line start tracking-stream)
-                                                   op-end (position-line op-end tracking-stream)
-                                                   end (position-line end tracking-stream)))))))
-                  (append (collect-positions macros :macro)
-                          (collect-positions compiler-macros :compiler-macro)))))))))
+           (pretty-expansion (pprint-to-string expansion)))
+      (multiple-value-bind (macros compiler-macros)
+          (collect-macro-forms expansion)
+        (let* ((all-macros (append macros compiler-macros))
+               (positions (collect-form-positions expansion
+                                                  pretty-expansion
+                                                  all-macros)))
+          (list pretty-expansion
+                (loop for form in all-macros
+                      for (start end) in positions
+                      ;; this assumes that the operator starts right
+                      ;; next to the opening parenthesis. We could
+                      ;; probably be more forgiving.
+                      for op-end = (+ start (length (to-string (first form))))
+                      collect (list
+                               (if (member form macros) :macro :compiler-macro)
+                               start (position-line start pretty-expansion)
+                               op-end (position-line op-end pretty-expansion)
+                               end (position-line end pretty-expansion)))))))))
+
+(defun position-line (position string)
+  (let ((line 0)
+        (last-newline-position 0))
+    (loop for i upto position
+          for char across string
+          when (eql char #\Newline)
+            do (incf line)
+               (setq last-newline-position i))
+    line))
 
 (defun macro-form-p (string binding-strings &optional compiler-macros?)
   (with-buffer-syntax ()
@@ -124,74 +133,72 @@
        form))
     (values macro-forms compiler-macro-forms)))
 
-;;;; FORM-TRACKING-STREAM
+;;;; Tracking Pretty Printer
 
-(defclass form-tracking-stream (swank/gray:fundamental-character-input-stream)
-  (;; The underlying stream.
-   (source :initarg :source :accessor source-of)
-   (position :initform 0 :accessor position-of)
-   ;; Track the position of each #\Newline that occurred so that, if
-   ;; desired, a line/column can be calculated for any position.
-   (newlines :initform (make-array 10 :adjustable t :fill-pointer 0)
-             :accessor newlines-of)
-   (forms :initform nil :accessor forms-of)))
+(defun marker-char-p (char)
+  (<= #xe000 (char-code char) #xe8ff))
 
-(defun %read-char (reader stream)
-  (handler-case
-      (let ((pos (position-of stream))
-            (result (funcall reader (source-of stream))))
-        (when result
-	  (incf (position-of stream))
-	  (when (eql result #\Newline)
-	    (let* ((newlines (newlines-of stream))
-		   (n (length newlines)))
-	      (when (or (zerop n) (> pos (aref newlines (1- n))))
-		(vector-push-extend pos newlines))))
-	  result))
-    (end-of-file () :eof)))
+(defun make-marker-char (position)
+  ;; using the private-use characters U+E000..U+F8FF as markers, so
+  ;; that's our upper limit for how many we can use.
+  (assert (<= position #x8ff))
+  (code-char (+ #xe000 position)))
 
-(defmethod swank/gray:stream-read-char ((stream form-tracking-stream))
-  (%read-char #'read-char stream))
+(defun marker-char-position (char)
+  (assert (marker-char-p char))
+  (- (char-code char) #xe000))
 
-(defmethod swank/gray:stream-read-char-no-hang ((stream form-tracking-stream))
-  (%read-char #'read-char-no-hang stream))
+(defun make-tracking-pprint-dispatch (forms)
+  (let ((original-table *print-pprint-dispatch*)
+        (table (copy-pprint-dispatch)))
+    (flet ((maybe-write-marker (position stream)
+             (when position
+               (write-char (make-marker-char position) stream))))
+      (set-pprint-dispatch 'cons
+                           (lambda (stream cons)
+                             (let ((pos (position cons forms)))
+                               (maybe-write-marker pos stream)
+                               ;; delegate printing to the original table.
+                               (funcall (pprint-dispatch cons original-table)
+                                        stream
+                                        cons)
+                               (maybe-write-marker pos stream)))
+                           most-positive-fixnum
+                           table))
+    table))
 
-(defmethod swank/gray:stream-unread-char ((stream form-tracking-stream) character)
-  (prog1 (unread-char character (source-of stream))
-    (decf (position-of stream))))
+(defparameter +whitespace+ (mapcar #'code-char '(9 13 10 32)))
 
-(defun annotate-position (stream object start)
-  (push (list object start (position-of stream))
-        (forms-of stream)))
+(defun whitespacep (char)
+  (member char +whitespace+))
 
-(defun form-tracking-stream-p (stream)
-  (typep stream 'form-tracking-stream))
+(defun collect-marker-positions (string position-count)
+  (let ((positions (make-array position-count :initial-element nil)))
+    (loop with p = 0
+          for char across string
+          unless (whitespacep char)
+            do (if (marker-char-p char)
+                   (push p (aref positions (marker-char-position char)))
+                   (incf p)))
+    (map 'list #'reverse positions)))
 
-(defun position-line (position tracking-stream)
-  (or (position-if (lambda (newline-pos)
-                     (> newline-pos position))
-                   (newlines-of tracking-stream))
-      (length (newlines-of tracking-stream))))
-
-(defun tracking-read-from-string (string &key (readtable *readtable*))
-  (with-input-from-string (string-stream string)
-    (let ((instrumented-readtable (copy-readtable readtable))
-          (tracking-stream (make-instance 'form-tracking-stream
-                                          :source string-stream)))
-      ;; we could do this for every readtable char, using
-      ;; named-readtables::do-readtable, but for our purposes here,
-      ;; #\( suffices.
-      (multiple-value-bind (fn non-terminating-p)
-          (get-macro-character #\( readtable)
-        (set-macro-character #\(
-                             (lambda (&rest args)
-                               (let ((start (1- (position-of tracking-stream)))
-                                     (object (apply fn args)))
-                                 (annotate-position tracking-stream object start)
-                                 object))
-                             non-terminating-p
-                             instrumented-readtable))
-      (let ((*readtable* instrumented-readtable))
-        (values (read tracking-stream) tracking-stream)))))
+(defun collect-form-positions (expansion printed-expansion forms)
+  (let* ((annotated-output
+           (pprint-to-string expansion
+                             (make-tracking-pprint-dispatch forms)))
+         (marker-positions
+           (collect-marker-positions annotated-output (length forms))))
+    (loop with i = -1 and non-whitespace-position = -1
+          for (start end) in marker-positions
+          collect (flet ((find-next (position)
+                           (loop until (or (eql non-whitespace-position position)
+                                           (= (1- (length printed-expansion))
+                                              (1+ i)))
+                                 unless (whitespacep (char printed-expansion
+                                                           (incf i)))
+                                   do (incf non-whitespace-position))
+                           i))
+                    (list (find-next start)
+                          (find-next end))))))
 
 (provide :swank-macrostep)
