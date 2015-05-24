@@ -138,13 +138,13 @@
 (defun marker-char-p (char)
   (<= #xe000 (char-code char) #xe8ff))
 
-(defun make-marker-char (position)
+(defun make-marker-char (id)
   ;; using the private-use characters U+E000..U+F8FF as markers, so
   ;; that's our upper limit for how many we can use.
-  (assert (<= position #x8ff))
-  (code-char (+ #xe000 position)))
+  (assert (<= 0 id #x8ff))
+  (code-char (+ #xe000 id)))
 
-(defun marker-char-position (char)
+(defun marker-char-id (char)
   (assert (marker-char-p char))
   (- (char-code char) #xe000))
 
@@ -178,7 +178,7 @@
           for char across string
           unless (whitespacep char)
             do (if (marker-char-p char)
-                   (push p (aref positions (marker-char-position char)))
+                   (push p (aref positions (marker-char-id char)))
                    (incf p)))
     (map 'list #'reverse positions)))
 
