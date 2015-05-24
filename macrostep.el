@@ -966,7 +966,7 @@ sub-forms.  See also `macrostep-sexp-at-point'."
 (defun macrostep-slime--propertize-macros (start-offset column-offset positions)
   "Put text properties on macro forms."
   (dolist (position positions)
-    (destructuring-bind (type start start-line op-end op-end-line end end-line)
+    (destructuring-bind (_ type start start-line op-end op-end-line end end-line)
         position
       (put-text-property (+ start-offset start (* column-offset start-line))
                          (+ start-offset end (* column-offset end-line))

@@ -45,15 +45,20 @@
           (list pretty-expansion
                 (loop for form in all-macros
                       for (start end) in positions
-                      ;; this assumes that the operator starts right
-                      ;; next to the opening parenthesis. We could
-                      ;; probably be more forgiving.
-                      for op-end = (+ start (length (to-string (first form))))
-                      collect (list
-                               (if (member form macros) :macro :compiler-macro)
-                               start (position-line start pretty-expansion)
-                               op-end (position-line op-end pretty-expansion)
-                               end (position-line end pretty-expansion)))))))))
+                      when (and start end)
+                        collect (let* ((op-name (to-string (first form)))
+                                       ;; this assumes that the
+                                       ;; operator starts right next
+                                       ;; to the opening
+                                       ;; parenthesis. We could
+                                       ;; probably be more forgiving.
+                                       (op-end (+ start (length op-name))))
+                                  (list
+                                   op-name
+                                   (if (member form macros) :macro :compiler-macro)
+                                   start (position-line start pretty-expansion)
+                                   op-end (position-line op-end pretty-expansion)
+                                   end (position-line end pretty-expansion))))))))))
 
 (defun position-line (position string)
   (let ((line 0)
@@ -195,7 +200,8 @@
           in (collect-marker-positions
               (pprint-to-string expansion (make-tracking-pprint-dispatch forms))
               (length forms))
-        collect (list (find-non-whitespace-position printed-expansion start)
-                      (find-non-whitespace-position printed-expansion end))))
+        collect (when (and start end)
+                  (list (find-non-whitespace-position printed-expansion start)
+                        (find-non-whitespace-position printed-expansion end)))))
 
 (provide :swank-macrostep)
