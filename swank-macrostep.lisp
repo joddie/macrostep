@@ -182,23 +182,20 @@
                    (incf p)))
     (map 'list #'reverse positions)))
 
+(defun find-non-whitespace-position (string position)
+  (loop with non-whitespace-position = -1
+        for i from 0 and char across string
+        unless (whitespacep char)
+          do (incf non-whitespace-position)
+        until (eql non-whitespace-position position)
+        finally (return i)))
+
 (defun collect-form-positions (expansion printed-expansion forms)
-  (let* ((annotated-output
-           (pprint-to-string expansion
-                             (make-tracking-pprint-dispatch forms)))
-         (marker-positions
-           (collect-marker-positions annotated-output (length forms))))
-    (loop with i = -1 and non-whitespace-position = -1
-          for (start end) in marker-positions
-          collect (flet ((find-next (position)
-                           (loop until (or (eql non-whitespace-position position)
-                                           (= (1- (length printed-expansion))
-                                              (1+ i)))
-                                 unless (whitespacep (char printed-expansion
-                                                           (incf i)))
-                                   do (incf non-whitespace-position))
-                           i))
-                    (list (find-next start)
-                          (find-next end))))))
+  (loop for (start end)
+          in (collect-marker-positions
+              (pprint-to-string expansion (make-tracking-pprint-dispatch forms))
+              (length forms))
+        collect (list (find-non-whitespace-position printed-expansion start)
+                      (find-non-whitespace-position printed-expansion end))))
 
 (provide :swank-macrostep)
