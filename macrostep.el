@@ -985,9 +985,10 @@ sub-forms.  See also `macrostep-sexp-at-point'."
                                  'macrostep-compiler-macro-face)))))))
 
 (defun macrostep-slime-macro-form-p (string)
-  (slime-eval
-   `(swank-macrostep:macro-form-p
-     ,string nil ,macrostep-expand-compiler-macros)))
+  (when string
+    (slime-eval
+     `(swank-macrostep:macro-form-p
+       ,string nil ,macrostep-expand-compiler-macros))))
 
 (defun macrostep-slime-environment-at-point ()
   (save-excursion
