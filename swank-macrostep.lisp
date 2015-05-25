@@ -46,19 +46,14 @@
                 (loop for form in all-macros
                       for (start end) in positions
                       when (and start end)
-                        collect (let* ((op-name (to-string (first form)))
-                                       ;; this assumes that the
-                                       ;; operator starts right next
-                                       ;; to the opening
-                                       ;; parenthesis. We could
-                                       ;; probably be more forgiving.
-                                       (op-end (+ start (length op-name))))
-                                  (list
-                                   op-name
-                                   (if (member form macros) :macro :compiler-macro)
-                                   start (position-line start pretty-expansion)
-                                   op-end (position-line op-end pretty-expansion)
-                                   end (position-line end pretty-expansion))))))))))
+                        collect (let ((op-name (to-string (first form))))
+                                  (list op-name
+                                        (if (member form macros)
+                                            :macro
+                                            :compiler-macro)
+                                        start
+                                        (position-line start pretty-expansion)
+                                        (length op-name))))))))))
 
 (defun position-line (position string)
   (let ((line 0)

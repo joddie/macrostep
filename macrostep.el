@@ -966,17 +966,23 @@ sub-forms.  See also `macrostep-sexp-at-point'."
 (defun macrostep-slime--propertize-macros (start-offset column-offset positions)
   "Put text properties on macro forms."
   (dolist (position positions)
-    (destructuring-bind (_ type start start-line op-end op-end-line end end-line)
+    (destructuring-bind (_ type start start-line op-length)
         position
-      (put-text-property (+ start-offset start (* column-offset start-line))
-                         (+ start-offset end (* column-offset end-line))
-                         'macrostep-macro-start t)
-      (put-text-property (+ 1 start-offset start (* column-offset start-line))
-                         (+ 1 start-offset op-end (* column-offset op-end-line))
-                         'font-lock-face
-                         (if (eq type :macro)
-                             'macrostep-macro-face
-                             'macrostep-compiler-macro-face)))))
+      (let ((opening-parenthesis-position
+              (+ start-offset start (* column-offset start-line))))
+        (put-text-property opening-parenthesis-position
+                           (1+ opening-parenthesis-position)
+                           'macrostep-macro-start
+                           t)
+        ;; this assumes that the operator starts right next to the
+        ;; opening parenthesis. We could probably be more robust.
+        (let ((op-start (1+ opening-parenthesis-position)))
+          (put-text-property op-start
+                             (+ op-start op-length)
+                             'font-lock-face
+                             (if (eq type :macro)
+                                 'macrostep-macro-face
+                                 'macrostep-compiler-macro-face)))))))
 
 (defun macrostep-slime-macro-form-p (string)
   (slime-eval
