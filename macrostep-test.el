@@ -169,6 +169,7 @@
                               (macrostep-print-sexp ,form)
                               (buffer-string))
                             ,string))))
+    (should-print nil "nil")
     (should-print 'symbol "symbol")
     (should-print '(single-element-list) "(single-element-list)")
     (should-print '(two-element list) "(two-element list)")

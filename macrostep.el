@@ -775,7 +775,7 @@ Will not collapse overlays that begin at START and end at END."
         ;; Indent the newly-inserted form in context
         (widen)
         (save-excursion
-          (backward-list)
+          (backward-sexp)
           (indent-sexp))))))
 
 (defun macrostep-collect-macro-forms (form &optional environment)
