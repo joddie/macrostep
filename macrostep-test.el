@@ -217,6 +217,21 @@
          (eq (get-char-property (point) 'font-lock-face)
              'macrostep-macro-face))))))
 
+(ert-deftest macrostep-expand-macro-defined-macros ()
+  (defmacro with-local-dummy-macro (&rest body)
+    `(cl-macrolet ((dummy (&rest args) `(expansion (of) ,@args)))
+       ,@body))
+  (macrostep-with-text
+   '(with-local-dummy-macro
+     (dummy form (one))
+     (dummy (form two)))
+   (macrostep-should-expand
+    '(dummy form (one))
+    '(expansion (of) form (one)))
+   (macrostep-should-expand
+    '(dummy (form two))
+    '(expansion (of) (form two)))))
+
 (ert-deftest macrostep-expand-in-separate-buffer ()
   (defmacro macrostep-dummy-macro (&rest args)
     `(expansion of ,@args))
