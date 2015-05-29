@@ -683,22 +683,6 @@ lambda expression that returns its expansion."
                       ,form)))))
             (error "macrostep-environment-at-point failed")))))))
 
-(defun macrostep-bindings-to-environment (bindings)
-  "Return the macro-expansion environment declared by BINDINGS as an alist.
-
-BINDINGS is a list in the form expected by `macrolet' or
-`cl-macrolet'.  The return value is an alist, as described in
-`macrostep-environment-at-point'."
-  ;; So that the later elements of bindings properly shadow the
-  ;; earlier ones in the returned environment, we must reverse the
-  ;; list before mapping over it.
-  (cl-loop for (name . forms) in (reverse bindings)
-           collect
-           ;; Adapted from the definition of `cl-macrolet':
-           (let ((res (cl--transform-lambda forms name)))
-             (eval (car res))
-             (cons name `(lambda ,@(cdr res))))))
-
 (defun macrostep-overlay-at-point ()
   "Return the innermost macro stepper overlay at point."
   (let ((result
