@@ -315,23 +315,82 @@ buffer.")
 
 ;; Other modes can enable macrostep by redefining these functions to
 ;; language-specific versions.
-(defvar-local macrostep-sexp-at-point-function
-    #'macrostep-sexp-at-point)
+(defvar-local macrostep-sexp-bounds-function
+    #'macrostep-sexp-bounds
+  "Function to return the bounds of the macro form nearest point.
 
-(defvar-local macrostep-sexp-bound-function
-    #'macrostep-sexp-bound)
+It will be called with no arguments and should return a cons of
+buffer positions, (START . END).  It should use `save-excursion'
+to avoid changing the position of point.
+
+The default value, `macrostep-sexp-bounds', implements this for
+Emacs Lisp, and may be suitable for other Lisp-like languages.")
+
+(defvar-local macrostep-sexp-at-point-function
+    #'macrostep-sexp-at-point
+  "Function to return the macro form at point for expansion.
+
+It will be called with no arguments, with point positioned at the
+START position returned by `macrostep-sexp-bounds-function', and
+should return a value suitable for passing as the first argument
+to `macrostep-expand-1-function'.
+
+The default value, `macrostep-sexp-at-point', implements this for
+Emacs Lisp, and may be suitable for other Lisp-like languages.")
 
 (defvar-local macrostep-environment-at-point-function
-    #'macrostep-environment-at-point)
+    #'macrostep-environment-at-point
+  "Function to return the local macro-expansion environment at point.
+
+It will be called with no arguments, and should return a value
+suitable for passing as the second argument to
+`macrostep-expand-1-function'.
+
+The default value, `macrostep-environment-at-point', is specific
+to Emacs Lisp.  For languages which do not implement local
+macro-expansion environments, this should be set to `ignore'
+or `(lambda () nil)'.")
 
 (defvar-local macrostep-expand-1-function
-    #'macrostep-expand-1)
+    #'macrostep-expand-1
+  "Function to perform one step of macro-expansion.
+
+It will be called with two arguments, FORM and ENVIRONMENT, the
+return values of `macrostep-sexp-at-point-function' and
+`macrostep-environment-at-point-function' respectively.  It
+should return the result of expanding FORM by one step as a value
+which is suitable for passing as the argument to
+`macrostep-print-function'.
+
+The default value, `macrostep-expand-1', is specific to Emacs Lisp.")
 
 (defvar-local macrostep-print-function
-    #'macrostep-pp)
+    #'macrostep-pp
+  "Function to pretty-print macro expansions.
+
+It will be called with one argument, the macro expansion returned
+from `macrostep-expand-1-function', and should insert a
+pretty-printed representation at point in the current buffer,
+leaving point just after the inserted representation, without
+altering any other text in the current buffer.
+
+The default value, `macrostep-pp', is specific to Emacs Lisp.")
 
 (defvar-local macrostep-macro-form-p-function
-    #'macrostep-macro-form-p)
+    #'macrostep-macro-form-p
+  "Function to check whether a form is a macro call.
+
+It will be called with two arguments, FORM and ENVIRONMENT -- the
+return values of `macrostep-sexp-at-point-function' and
+`macrostep-environment-at-point-function' respectively -- and
+should return non-nil if FORM would undergo macro-expansion in
+ENVIRONMENT.
+
+This is called only from `macrostep-sexp-bounds', so it need not
+be provided if a different value is used for
+`macrostep-sexp-bounds-function'.
+
+The default value, `macrostep-macro-form-p', is specific to Emacs Lisp.")
 
 
 ;;; Define keymap and minor mode
@@ -412,67 +471,69 @@ buffer temporarily read-only. If macrostep-mode is active and the
 form following point is not a macro form, search forward in the
 buffer and expand the next macro form found, if any."
   (interactive)
-  (let* ((sexp (macrostep--macro-form-near-point))
-         (start (point))
-         (end (copy-marker (funcall macrostep-sexp-bound-function)))
-         (text (buffer-substring start end))
-         (macrostep-environment
-          (funcall macrostep-environment-at-point-function))
-         (expansion (funcall macrostep-expand-1-function sexp)))
+  (cl-destructuring-bind (start . end)
+      (funcall macrostep-sexp-bounds-function)
+    (goto-char start)
+    (let* ((sexp (funcall macrostep-sexp-at-point-function))
+           (end (copy-marker end))
+           (text (buffer-substring start end))
+           (macrostep-environment
+            (funcall macrostep-environment-at-point-function))
+           (expansion (funcall macrostep-expand-1-function sexp)))
 
-    ;; Create a dedicated macro-expansion buffer and copy the text to
-    ;; be expanded into it, if required
-    (when (and macrostep-expand-in-separate-buffer
-               (not macrostep-expansion-buffer))
-      (let ((mode major-mode)
-            (buffer
-             (get-buffer-create (generate-new-buffer-name "*macro expansion*"))))
-        (set-buffer buffer)
-        (funcall mode)
-        (setq macrostep-expansion-buffer t)
-        (setq macrostep-outer-environment macrostep-environment)
-        (save-excursion
-          (setq start (point))
-          (insert text)
-          (setq end (point-marker)))
-        (pop-to-buffer buffer)))
-    
-    (unless macrostep-mode (macrostep-mode t))
-    (let ((existing-overlay (macrostep-overlay-at-point))
-          (macrostep-gensym-depth macrostep-gensym-depth)
-          (macrostep-gensyms-this-level nil)
-          priority)
-      (if existing-overlay
-	  (progn        ; Expanding part of a previous macro-expansion
-            (setq priority (1+ (overlay-get existing-overlay 'priority)))
-            (setq macrostep-gensym-depth
-                  (overlay-get existing-overlay 'macrostep-gensym-depth)))
-	;; Expanding source buffer text
-	(setq priority 1)
-        (setq macrostep-gensym-depth -1))
+      ;; Create a dedicated macro-expansion buffer and copy the text to
+      ;; be expanded into it, if required
+      (when (and macrostep-expand-in-separate-buffer
+                 (not macrostep-expansion-buffer))
+        (let ((mode major-mode)
+              (buffer
+               (get-buffer-create (generate-new-buffer-name "*macro expansion*"))))
+          (set-buffer buffer)
+          (funcall mode)
+          (setq macrostep-expansion-buffer t)
+          (setq macrostep-outer-environment macrostep-environment)
+          (save-excursion
+            (setq start (point))
+            (insert text)
+            (setq end (point-marker)))
+          (pop-to-buffer buffer)))
 
-      (with-silent-modifications
-        (atomic-change-group
-          (let ((inhibit-read-only t))
-            (save-excursion
-              ;; Insert expansion
-              (funcall macrostep-print-function expansion)
-              ;; Delete the original form
-              (macrostep-collapse-overlays-in (point) end)
-              (delete-region (point) end)
-              ;; Create a new overlay
-              (let ((overlay
-                     (make-overlay start
-                                   (if (looking-at "\n")
-                                       (1+ (point))
-                                     (point)))))
-                (unless macrostep-expansion-buffer
-                  ;; Highlight the overlay in original source buffers only
-                  (overlay-put overlay 'face 'macrostep-expansion-highlight-face))
-                (overlay-put overlay 'priority priority)
-                (overlay-put overlay 'macrostep-original-text text)
-                (overlay-put overlay 'macrostep-gensym-depth macrostep-gensym-depth)
-                (push overlay macrostep-overlays)))))))))
+      (unless macrostep-mode (macrostep-mode t))
+      (let ((existing-overlay (macrostep-overlay-at-point))
+            (macrostep-gensym-depth macrostep-gensym-depth)
+            (macrostep-gensyms-this-level nil)
+            priority)
+        (if existing-overlay
+            (progn        ; Expanding part of a previous macro-expansion
+              (setq priority (1+ (overlay-get existing-overlay 'priority)))
+              (setq macrostep-gensym-depth
+                    (overlay-get existing-overlay 'macrostep-gensym-depth)))
+          ;; Expanding source buffer text
+          (setq priority 1)
+          (setq macrostep-gensym-depth -1))
+
+        (with-silent-modifications
+          (atomic-change-group
+            (let ((inhibit-read-only t))
+              (save-excursion
+                ;; Insert expansion
+                (funcall macrostep-print-function expansion)
+                ;; Delete the original form
+                (macrostep-collapse-overlays-in (point) end)
+                (delete-region (point) end)
+                ;; Create a new overlay
+                (let ((overlay
+                       (make-overlay start
+                                     (if (looking-at "\n")
+                                         (1+ (point))
+                                       (point)))))
+                  (unless macrostep-expansion-buffer
+                    ;; Highlight the overlay in original source buffers only
+                    (overlay-put overlay 'face 'macrostep-expansion-highlight-face))
+                  (overlay-put overlay 'priority priority)
+                  (overlay-put overlay 'macrostep-original-text text)
+                  (overlay-put overlay 'macrostep-gensym-depth macrostep-gensym-depth)
+                  (push overlay macrostep-overlays))))))))))
 
 (defun macrostep-collapse ()
   "Collapse the innermost macro expansion near point to its source text.
@@ -534,28 +595,6 @@ If no more macro expansions are visible after this, exit
 
 ;;; Utility functions (not language-specific)
 
-(defun macrostep--macro-form-near-point ()
-  "Return the macro form nearest point, possibly moving point to it.
-
-If point is not in or before a macro form (as determined by
-`macrostep-sexp-at-point-function' and
-`macrostep-macro-form-p-function'), attempts to search forward in
-the buffer for the next macro, using `macrostep-next-macro'.
-Signals an error if no macro form is found."
-  (let ((sexp (funcall macrostep-sexp-at-point-function))
-        (macrostep-environment (funcall macrostep-environment-at-point-function)))
-    ;; If point is not before a macro form, try to find the next one in the buffer
-    (if (funcall macrostep-macro-form-p-function sexp)
-        sexp
-      (condition-case nil
-          (progn
-            (macrostep-next-macro)
-            (funcall macrostep-sexp-at-point-function))
-        (error
-         (if (consp sexp)
-             (error "(%s ...) is not a macro form" (car sexp))
-           (error "Text at point is not a macro form.")))))))
-
 (defun macrostep-overlay-at-point ()
   "Return the innermost macro stepper overlay at point."
   (let ((result
@@ -604,29 +643,42 @@ Will not collapse overlays that begin at START and end at END."
 
 ;;; Emacs Lisp implementation
 
+(defun macrostep-sexp-bounds ()
+  "Find the bounds of the macro form nearest point.
+
+If point is not before an open-paren, moves up to the nearest
+enclosing list.  If the form at point is not a macro call,
+attempts to move forward to the next macro form as determined by
+`macrostep-macro-form-p-function'.
+
+Returns a cons of buffer positions, (START . END)."
+  (save-excursion
+    (if (not (looking-at "[(`]"))
+        (backward-up-list 1))
+    (if (equal (char-before) ?`)
+        (backward-char))
+    (let ((sexp (funcall macrostep-sexp-at-point-function))
+          (macrostep-environment (funcall macrostep-environment-at-point-function)))
+      ;; If this isn't a macro form, try to find the next one in the buffer
+      (unless (funcall macrostep-macro-form-p-function sexp)
+        (condition-case nil
+            (macrostep-next-macro)
+          (error
+           (if (consp sexp)
+               (error "(%s ...) is not a macro form" (car sexp))
+             (error "Text at point is not a macro form."))))))
+    (cons (point) (scan-sexps (point) 1))))
+
 (defun macrostep-sexp-at-point ()
   "Return the sexp near point for purposes of macro-stepper expansion.
 
 If the sexp near point is part of a macro expansion, returns the
 saved text of the macro expansion, and does not read from the
-buffer. This preserves uninterned symbols in the macro expansion,
-so that they can be colored consistently. See also
-`macrostep-print-sexp'.
-
-Also moves point to the beginning of the returned s-expression."
-  (if (not (looking-at "[(`]"))
-      (backward-up-list 1))
-  (if (equal (char-before) ?`)
-      (backward-char))
+buffer.  This preserves uninterned symbols in the macro
+expansion, so that they can be fontified consistently.  (See
+`macrostep-print-sexp'.)"
   (or (get-text-property (point) 'macrostep-expanded-text)
-      (progn
-	;; use scan-sexps for the side-effect of producing an error
-	;; message for unbalanced parens, etc.
-	(scan-sexps (point) 1)
-	(sexp-at-point))))
-
-(defun macrostep-sexp-bound ()
-  (scan-sexps (point) 1))
+      (sexp-at-point)))
 
 (defun macrostep-macro-form-p (form)
   "Return non-nil if FORM would be evaluated via macro expansion.
