@@ -1041,12 +1041,12 @@ fontified using the same face (modulo the number of faces; see
 ;;;###autoload
 (add-hook 'slime-repl-mode-hook #'macrostep-slime-mode-hook)
 
-(defun macrostep-slime-expand-1 (string)
+(defun macrostep-slime-expand-1 (string _ignore)
   (slime-eval
    `(swank-macrostep:macrostep-expand-1
      ,string nil ,macrostep-expand-compiler-macros)))
 
-(defun macrostep-slime-insert (result)
+(defun macrostep-slime-insert (result _ignore)
   "Insert RESULT at point, indenting to match the current column."
   (cl-destructuring-bind (expansion positions) result
     (let* ((indent-string (concat "\n" (make-string (current-column) ? )))
@@ -1077,7 +1077,7 @@ fontified using the same face (modulo the number of faces; see
                                  'macrostep-macro-face
                                  'macrostep-compiler-macro-face)))))))
 
-(defun macrostep-slime-macro-form-p (string)
+(defun macrostep-slime-macro-form-p (string _ignore)
   (when string
     (slime-eval
      `(swank-macrostep:macro-form-p
