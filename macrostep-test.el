@@ -71,9 +71,9 @@
 (ert-deftest macrostep-expand-and-collapse ()
   (dolist (expander
             (list
-             #'identity
-             (lambda (sexp) `(progn ,sexp ,sexp))
-             (lambda (sexp) `(long
+             (lambda (sexp _env) sexp)
+             (lambda (sexp _env) `(progn ,sexp ,sexp))
+             (lambda (sexp _env) `(long
                               (complicated
                                (expansion of ,sexp () ())
                                (with trailing forms))))))
@@ -253,7 +253,8 @@
      '(macrolet ((some-macro (&rest forms) (cons 'progn forms)))
        (some-macro with (arguments))
        (intervening body forms)
-       (some-macro with (more) (arguments))))
+       (some-macro with (more) (arguments)))
+     nil)
     (cl-flet ((search (text)
                 (macrostep-goto text t)
                 ;; Leave point on the head of the form

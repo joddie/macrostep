@@ -216,9 +216,6 @@
   "Saved value of buffer-read-only upon entering macrostep mode.")
 (make-variable-buffer-local 'macrostep-saved-read-only)
 
-(defvar macrostep-environment nil
-  "Local macro-expansion environment, including macros declared by `cl-macrolet'.")
-
 (defvar macrostep-expansion-buffer nil
   "Non-nil if the current buffer is a macro-expansion buffer.")
 (make-variable-buffer-local 'macrostep-expansion-buffer)
@@ -368,11 +365,13 @@ The default value, `macrostep-expand-1', is specific to Emacs Lisp.")
     #'macrostep-pp
   "Function to pretty-print macro expansions.
 
-It will be called with one argument, the macro expansion returned
-from `macrostep-expand-1-function', and should insert a
-pretty-printed representation at point in the current buffer,
-leaving point just after the inserted representation, without
-altering any other text in the current buffer.
+It will be called with two arguments, FORM and ENVIRONMENT, the
+return values of `macrostep-sexp-at-point-function' and
+`macrostep-environment-at-point-function' respectively.  It
+should insert a pretty-printed representation at point in the
+current buffer, leaving point just after the inserted
+representation, without altering any other text in the current
+buffer.
 
 The default value, `macrostep-pp', is specific to Emacs Lisp.")
 
@@ -477,9 +476,8 @@ buffer and expand the next macro form found, if any."
     (let* ((sexp (funcall macrostep-sexp-at-point-function))
            (end (copy-marker end))
            (text (buffer-substring start end))
-           (macrostep-environment
-            (funcall macrostep-environment-at-point-function))
-           (expansion (funcall macrostep-expand-1-function sexp)))
+           (env (funcall macrostep-environment-at-point-function))
+           (expansion (funcall macrostep-expand-1-function sexp env)))
 
       ;; Create a dedicated macro-expansion buffer and copy the text to
       ;; be expanded into it, if required
@@ -491,7 +489,7 @@ buffer and expand the next macro form found, if any."
           (set-buffer buffer)
           (funcall mode)
           (setq macrostep-expansion-buffer t)
-          (setq macrostep-outer-environment macrostep-environment)
+          (setq macrostep-outer-environment env)
           (save-excursion
             (setq start (point))
             (insert text)
@@ -517,7 +515,7 @@ buffer and expand the next macro form found, if any."
             (let ((inhibit-read-only t))
               (save-excursion
                 ;; Insert expansion
-                (funcall macrostep-print-function expansion)
+                (funcall macrostep-print-function expansion env)
                 ;; Delete the original form
                 (macrostep-collapse-overlays-in (point) end)
                 (delete-region (point) end)
@@ -658,9 +656,9 @@ Returns a cons of buffer positions, (START . END)."
     (if (equal (char-before) ?`)
         (backward-char))
     (let ((sexp (funcall macrostep-sexp-at-point-function))
-          (macrostep-environment (funcall macrostep-environment-at-point-function)))
+          (env (funcall macrostep-environment-at-point-function)))
       ;; If this isn't a macro form, try to find the next one in the buffer
-      (unless (funcall macrostep-macro-form-p-function sexp)
+      (unless (funcall macrostep-macro-form-p-function sexp env)
         (condition-case nil
             (macrostep-next-macro)
           (error
@@ -680,7 +678,7 @@ expansion, so that they can be fontified consistently.  (See
   (or (get-text-property (point) 'macrostep-expanded-text)
       (sexp-at-point)))
 
-(defun macrostep-macro-form-p (form)
+(defun macrostep-macro-form-p (form environment)
   "Return non-nil if FORM would be evaluated via macro expansion.
 
 If FORM is an invocation of a macro defined by `defmacro' or an
@@ -691,13 +689,14 @@ call to a function with a compiler macro, return the symbol
 `compiler-macro'.
 
 Otherwise, return nil."
-  (car (macrostep--macro-form-info form t)))
+  (car (macrostep--macro-form-info form environment t)))
 
-(defun macrostep--macro-form-info (form &optional inhibit-autoload)
+(defun macrostep--macro-form-info (form environment &optional inhibit-autoload)
   "Return information about macro definitions that apply to FORM.
 
-If no macros are involved in the evaluation of FORM, returns nil.
-Otherwise, returns a cons (TYPE . DEFINITION).
+If no macros are involved in the evaluation of FORM within
+ENVIRONMENT, returns nil.  Otherwise, returns a cons (TYPE
+. DEFINITION).
 
 If FORM would be evaluated by a macro defined by `defmacro',
 `cl-macrolet', etc., TYPE is the symbol `macro' and DEFINITION is
@@ -717,7 +716,7 @@ value of DEFINITION in the result will be nil."
   (pcase form
     (`(,(and (pred symbolp) head) . ,_)
       (let ((macrolet-definition
-             (assoc-default head macrostep-environment 'eq)))
+             (assoc-default head environment 'eq)))
         (if macrolet-definition
             `(macro . ,macrolet-definition)
           (let ((compiler-macro-definition
@@ -739,11 +738,11 @@ value of DEFINITION in the result will be nil."
                 (void-function nil)))))))
     (_ nil)))
 
-(defun macrostep-expand-1 (form)
+(defun macrostep-expand-1 (form environment)
   "Return result of macro-expanding the top level of FORM by exactly one step.
 Unlike `macroexpand', this function does not continue macro
 expansion until a non-macro-call results."
-  (pcase (macrostep--macro-form-info form)
+  (pcase (macrostep--macro-form-info form environment)
     (`nil form)
     (`(macro . ,definition)
      (apply definition (cdr form)))
@@ -883,12 +882,12 @@ Controls the printing of sub-forms in `macrostep-print-sexp'.")
 (defvar macrostep-collected-compiler-macro-forms nil
   "A list of compiler-macro forms to be highlighted in `macrostep-print-sexp'.")
 
-(defun macrostep-pp (sexp)
+(defun macrostep-pp (sexp environment)
   "Pretty-print SEXP, fontifying macro forms and uninterned symbols."
   (cl-destructuring-bind
         (macrostep-collected-macro-form-alist
          macrostep-collected-compiler-macro-forms)
-      (macrostep-collect-macro-forms sexp macrostep-environment)
+      (macrostep-collect-macro-forms sexp environment)
     (let ((print-quoted t))
       (macrostep-print-sexp sexp)
       ;; Point is now after the expanded form; pretty-print it
