@@ -374,14 +374,19 @@ quit and return to normal editing.
 
 ;;; Interactive functions
 ;;;###autoload
-(defun macrostep-expand ()
+(defun macrostep-expand (toggle-separate-buffer)
   "Expand the Elisp macro form following point by one step.
 
 Enters `macrostep-mode' if it is not already active, making the
 buffer temporarily read-only. If macrostep-mode is active and the
 form following point is not a macro form, search forward in the
-buffer and expand the next macro form found, if any."
-  (interactive)
+buffer and expand the next macro form found, if any.
+
+With a prefix argument, the expansion is displayed in a separate
+buffer instead of inline in the current buffer.  Setting
+`macrostep-expand-in-separate-buffer' to non-nil swaps these two
+behaviors."
+  (interactive "P")
   (let ((sexp (macrostep-sexp-at-point))
         (macrostep-environment (macrostep-environment-at-point)))
     (when (not (macrostep-macro-form-p sexp))
@@ -396,19 +401,22 @@ buffer and expand the next macro form found, if any."
 
     ;; Create a dedicated macro-expansion buffer and copy the text to
     ;; be expanded into it, if required
-    (when (and macrostep-expand-in-separate-buffer
-               (not macrostep-expansion-buffer))
-      (let ((buffer
-             (get-buffer-create (generate-new-buffer-name "*macro expansion*"))))
-        (set-buffer buffer)
-        (emacs-lisp-mode)
-        (setq macrostep-expansion-buffer t)
-        (setq macrostep-outer-environment macrostep-environment)
-        (save-excursion
-          (let ((print-level nil)
-                (print-length nil))
-            (print sexp (current-buffer))))
-        (pop-to-buffer buffer)))
+    (let ((separate-buffer-p
+           (if toggle-separate-buffer
+               (not macrostep-expand-in-separate-buffer)
+             macrostep-expand-in-separate-buffer)))
+      (when (and separate-buffer-p (not macrostep-expansion-buffer))
+        (let ((buffer
+               (get-buffer-create (generate-new-buffer-name "*macro expansion*"))))
+          (set-buffer buffer)
+          (emacs-lisp-mode)
+          (setq macrostep-expansion-buffer t)
+          (setq macrostep-outer-environment macrostep-environment)
+          (save-excursion
+            (let ((print-level nil)
+                  (print-length nil))
+              (print sexp (current-buffer))))
+          (pop-to-buffer buffer))))
     
     (let* ((inhibit-read-only t)
 	   (expansion (macrostep-expand-1 sexp))
