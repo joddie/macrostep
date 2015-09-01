@@ -462,14 +462,19 @@ quit and return to normal editing.
 
 ;;; Interactive functions
 ;;;###autoload
-(defun macrostep-expand ()
+(defun macrostep-expand (toggle-separate-buffer)
   "Expand the Elisp macro form following point by one step.
 
 Enters `macrostep-mode' if it is not already active, making the
 buffer temporarily read-only. If macrostep-mode is active and the
 form following point is not a macro form, search forward in the
-buffer and expand the next macro form found, if any."
-  (interactive)
+buffer and expand the next macro form found, if any.
+
+With a prefix argument, the expansion is displayed in a separate
+buffer instead of inline in the current buffer.  Setting
+`macrostep-expand-in-separate-buffer' to non-nil swaps these two
+behaviors."
+  (interactive "P")
   (cl-destructuring-bind (start . end)
       (funcall macrostep-sexp-bounds-function)
     (goto-char start)
@@ -481,20 +486,23 @@ buffer and expand the next macro form found, if any."
 
       ;; Create a dedicated macro-expansion buffer and copy the text to
       ;; be expanded into it, if required
-      (when (and macrostep-expand-in-separate-buffer
-                 (not macrostep-expansion-buffer))
-        (let ((mode major-mode)
-              (buffer
-               (get-buffer-create (generate-new-buffer-name "*macro expansion*"))))
-          (set-buffer buffer)
-          (funcall mode)
-          (setq macrostep-expansion-buffer t)
-          (setq macrostep-outer-environment env)
-          (save-excursion
-            (setq start (point))
-            (insert text)
-            (setq end (point-marker)))
-          (pop-to-buffer buffer)))
+      (let ((separate-buffer-p
+             (if toggle-separate-buffer
+                 (not macrostep-expand-in-separate-buffer)
+               macrostep-expand-in-separate-buffer)))
+        (when (and separate-buffer-p (not macrostep-expansion-buffer))
+          (let ((mode major-mode)
+                (buffer
+                 (get-buffer-create (generate-new-buffer-name "*macro expansion*"))))
+            (set-buffer buffer)
+            (funcall mode)
+            (setq macrostep-expansion-buffer t)
+            (setq macrostep-outer-environment env)
+            (save-excursion
+              (setq start (point))
+              (insert text)
+              (setq end (point-marker)))
+            (pop-to-buffer buffer))))
 
       (unless macrostep-mode (macrostep-mode t))
       (let ((existing-overlay (macrostep-overlay-at-point))
