@@ -462,7 +462,7 @@ quit and return to normal editing.
 
 ;;; Interactive functions
 ;;;###autoload
-(defun macrostep-expand (toggle-separate-buffer)
+(defun macrostep-expand (&optional toggle-separate-buffer)
   "Expand the Elisp macro form following point by one step.
 
 Enters `macrostep-mode' if it is not already active, making the
