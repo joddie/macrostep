@@ -875,7 +875,9 @@ Emacs's builtin `macroexpand' function and calling
                                  macro-form-alist)))
                     ((and (consp form)
                           (symbolp (car form))
-                          (get (car form) 'compiler-macro))
+                          macrostep-expand-compiler-macros
+                          (not (eq form
+                                   (cl-compiler-macroexpand form))))
                      (setq compiler-macro-forms
                            (cons form compiler-macro-forms))))
               expansion))))
