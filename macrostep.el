@@ -914,6 +914,19 @@ Controls the printing of sub-forms in `macrostep-print-sexp'.")
           (backward-sexp)
           (indent-sexp))))))
 
+;; This must be defined before `macrostep-print-sexp':
+(defmacro macrostep-propertize (form &rest plist)
+  "Evaluate FORM, applying syntax properties in PLIST to any inserted text."
+  (declare (indent 1)
+           (debug (&rest form)))
+  (let ((start (make-symbol "start")))
+    `(let ((,start (point)))
+       (prog1
+           ,form
+         ,@(loop for (key value) on plist by #'cddr
+                 collect `(put-text-property ,start (point)
+                                             ,key ,value))))))
+
 (defun macrostep-print-sexp (sexp)
   "Insert SEXP like `print', fontifying macro forms and uninterned symbols.
 
@@ -1019,18 +1032,6 @@ fontified using the same face (modulo the number of faces; see
 	(let ((face (ring-ref macrostep-gensym-faces macrostep-gensym-depth)))
 	  (put symbol 'macrostep-gensym-face face)
 	  face))))
-
-(defmacro macrostep-propertize (form &rest plist)
-  "Evaluate FORM, applying syntax properties in PLIST to any inserted text."
-  (declare (indent 1)
-           (debug (&rest form)))
-  (let ((start (make-symbol "start")))
-    `(let ((,start (point)))
-       (prog1
-           ,form
-         ,@(loop for (key value) on plist by #'cddr
-                 collect `(put-text-property ,start (point)
-                                             ,key ,value))))))
 
 
 ;;; Basic SLIME support
