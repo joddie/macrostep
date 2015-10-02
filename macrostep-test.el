@@ -17,6 +17,8 @@
 ;; You should have received a copy of the GNU General Public License
 ;; along with this program.  If not, see `http://www.gnu.org/licenses/'.
 
+
+;;;; Conveniences for defining tests
 
 (defmacro macrostep-with-text (object &rest forms)
   (declare (indent 1)
@@ -29,6 +31,12 @@
        (save-excursion
          (print ,object))
        ,@forms)))
+
+(defun macrostep-goto (text &optional from-point-min)
+  (when from-point-min (goto-char (point-min)))
+  (let ((search-whitespace-regexp "[[:space:]\n]+"))
+    (search-forward-lax-whitespace text)
+    (goto-char (match-beginning 0))))
 
 (defmacro macrostep-should-expand (form expansion)
   `(save-excursion
@@ -45,6 +53,8 @@
                       ,expansion)))
          (macrostep-collapse-all)))))
 
+
+;;;; Tests
 (ert-deftest macrostep-expand-defmacro ()
   (defmacro macrostep-dummy-macro (&rest args)
     `(expansion of ,@args))
@@ -57,6 +67,34 @@
    (macrostep-should-expand
     '(macrostep-dummy-macro (first (argument)) second (third argument))
     '(expansion of (first (argument)) second (third argument)))))
+
+(ert-deftest macrostep-expand-and-collapse ()
+  (dolist (expander
+            (list
+             (lambda (sexp _env) sexp)
+             (lambda (sexp _env) `(progn ,sexp ,sexp))
+             (lambda (sexp _env) `(long
+                              (complicated
+                               (expansion of ,sexp () ())
+                               (with trailing forms))))))
+    (let ((macrostep-expand-1-function expander)
+          (macrostep-macro-form-p-function
+           (lambda (&rest _) t)))
+      (macrostep-with-text
+          '(progn
+            (first form)
+            (second form)
+            (third (nested form)))
+        (macrostep-goto "(first ")
+        (let ((original-text (buffer-string)))
+          (dotimes (i 10)
+            (dotimes (j i)
+              (macrostep-expand))
+            (dotimes (j i)
+              (macrostep-collapse))
+            (should (null macrostep-overlays))
+            (should (string= (buffer-string)
+                             original-text))))))))
 
 (ert-deftest macrostep-expand-macrolet ()
   (macrostep-with-text
@@ -162,6 +200,30 @@
         (apply (cdr (assq 'get env)) '(:begin))
         '(plist-get list :begin))))))
 
+(ert-deftest macrostep-environment-at-point-2 ()
+  (defmacro macrostep-with-dummy (&rest body)
+    `(cl-macrolet ((dummy (&rest forms) `(expansion of ,@forms)))
+       ,@body))
+  (macrostep-with-text
+      '(macrostep-with-dummy
+        (body)
+        (forms)
+        (cl-loop for i from 6 to 10
+         do (something)))
+    (macrostep-goto "(macrostep-with-dummy" t)
+    (should (null (macrostep-environment-at-point)))
+
+    (dolist (place (list "(body)" "dy)" "(forms)" "rms)"
+                         "(something)"))
+      (macrostep-goto place)
+      (let* ((env (macrostep-environment-at-point))
+             (dummy-defn (cdr (assq 'dummy env))))
+        (should dummy-defn)
+        (should (functionp dummy-defn))
+        (should (equal
+                 (funcall dummy-defn 'lorem 'ipsum)
+                 `(expansion of lorem ipsum)))))))
+
 (ert-deftest macrostep-print-sexp ()
   (cl-macrolet ((should-print (form string)
                   `(should (equal
@@ -169,6 +231,7 @@
                               (macrostep-print-sexp ,form)
                               (buffer-string))
                             ,string))))
+    (should-print nil "nil")
     (should-print 'symbol "symbol")
     (should-print '(single-element-list) "(single-element-list)")
     (should-print '(two-element list) "(two-element list)")
@@ -183,38 +246,51 @@
     (should-print '`(backquoted (form) ,with ,@splices)
                   "`(backquoted (form) ,with ,@splices)")))
 
-(ert-deftest macrostep-print-sexp-macrolet-environment ()
+(ert-deftest macrostep-pp-macrolet-environment ()
   (with-temp-buffer
     (emacs-lisp-mode)
-    (save-excursion
-      (macrostep-print-sexp
-       '(macrolet ((some-macro (&rest forms) (cons 'progn forms)))
-         (some-macro with (arguments))
-         (intervening body forms)
-         (some-macro with (more) (arguments))))
-      (cl-flet ((search (text)
-                  (goto-char (point-min))
-                  (search-forward text)
-                  (goto-char (match-beginning 0))
-                  ;; Leave point on the head of the form
-                  (forward-char)))
-        ;; The occurrence of "(some-macro" in the binding list should
-        ;; not be fontified as a macro form
-        (search "(some-macro (&rest")
-        (should-not
-         (eq (get-char-property (point) 'font-lock-face)
-             'macrostep-macro-face))
+    (macrostep-pp
+     '(macrolet ((some-macro (&rest forms) (cons 'progn forms)))
+       (some-macro with (arguments))
+       (intervening body forms)
+       (some-macro with (more) (arguments)))
+     nil)
+    (cl-flet ((search (text)
+                (macrostep-goto text t)
+                ;; Leave point on the head of the form
+                (forward-char)))
+      ;; The occurrence of "(some-macro" in the binding list should
+      ;; not be fontified as a macro form
+      (search "(some-macro (&rest")
+      (should-not
+       (eq (get-char-property (point) 'font-lock-face)
+           'macrostep-macro-face))
 
-        ;; However, the two occurrences in the body of the macrolet should be.
-        (search "(some-macro with (arguments)")
-        (should
-         (eq (get-char-property (point) 'font-lock-face)
-             'macrostep-macro-face))
+      ;; However, the two occurrences in the body of the macrolet should be.
+      (search "(some-macro with (arguments)")
+      (should
+       (eq (get-char-property (point) 'font-lock-face)
+           'macrostep-macro-face))
 
-        (search "(some-macro with (more)")
-        (should
-         (eq (get-char-property (point) 'font-lock-face)
-             'macrostep-macro-face))))))
+      (search "(some-macro with (more)")
+      (should
+       (eq (get-char-property (point) 'font-lock-face)
+           'macrostep-macro-face)))))
+
+(ert-deftest macrostep-expand-macro-defined-macros ()
+  (defmacro with-local-dummy-macro (&rest body)
+    `(cl-macrolet ((dummy (&rest args) `(expansion (of) ,@args)))
+       ,@body))
+  (macrostep-with-text
+   '(with-local-dummy-macro
+     (dummy form (one))
+     (dummy (form two)))
+   (macrostep-should-expand
+    '(dummy form (one))
+    '(expansion (of) form (one)))
+   (macrostep-should-expand
+    '(dummy (form two))
+    '(expansion (of) (form two)))))
 
 (ert-deftest macrostep-expand-in-separate-buffer ()
   (defmacro macrostep-dummy-macro (&rest args)
@@ -244,8 +320,8 @@
             `(expansion of ,@args)))
           (dummy-macro-1 (some (arguments))))
       (let ((original-buffer (current-buffer)))
-        (search-forward "(dummy-macro-1 (some")
-        (goto-char (match-beginning 0))
+        (macrostep-goto "(dummy-macro-1 (some")
+
         (macrostep-expand)
         (should (not (equal (current-buffer) original-buffer)))
         (should macrostep-expansion-buffer)

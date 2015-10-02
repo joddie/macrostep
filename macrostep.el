@@ -1,12 +1,12 @@
-;;; macrostep.el --- interactive macro stepper for Emacs Lisp
+;;; macrostep.el --- interactive macro expander
 
-;; Copyright (C) 2012-2014 Jonathan Oddie <j.j.oddie@gmail.com>
+;; Copyright (C) 2012-2015 Jonathan Oddie <j.j.oddie@gmail.com>
 
 ;; Author:     joddie <j.j.oddie@gmail.com>
 ;; Maintainer: joddie <j.j.oddie@gmail.com>
 ;; Created:    16 January 2012
-;; Updated:    11 May 2014
-;; Version:    0.8
+;; Updated:    01 October 2015
+;; Version:    0.9
 ;; Keywords:   lisp, languages, macro, debugging
 ;; Url:        https://github.com/joddie/macrostep
 
@@ -27,39 +27,39 @@
 
 ;;; Commentary:
 
-;; 1 Overview
-;; ==========
+;; `macrostep' is an Emacs minor mode for interactively stepping through
+;; the expansion of macros in Emacs Lisp source code.  It lets you see
+;; exactly what happens at each step of the expansion process by
+;; pretty-printing the expanded forms inline in the source buffer, which is
+;; temporarily read-only while macro expansions are visible.  You can
+;; expand and collapse macro forms one step at a time, and evaluate or
+;; instrument the expansions for debugging with Edebug as normal (but see
+;; "Bugs and known limitations", below).  Single-stepping through the
+;; expansion is particularly useful for debugging macros that expand into
+;; another macro form.  These can be difficult to debug with Emacs'
+;; built-in `macroexpand', which continues expansion until the top-level
+;; form is no longer a macro call.
 
-;;   This is a minor mode for interactively stepping through the expansion
-;;   of macros in Emacs Lisp source code. It lets you see exactly what
-;;   happens at each step of the expansion process by pretty-printing the
-;;   expanded forms inline in the source buffer, which is read-only while
-;;   macro expansions are visible. You can expand and collapse macro forms
-;;   one step at a time, and evaluate or instrument them for debugging with
-;;   Edebug as normal (but see "Bugs and known limitations",
-;;   below). Single-stepping through the expansion is useful for debugging
-;;   macros that expand into another macro form, especially one like
-;;   `lexical-let' that does significant rewriting. These can be difficult
-;;   to debug with Emacs' built-in `macroexpand', because `macroexpand'
-;;   continues expansion until the top-level form is no longer a macro
-;;   call.
+;; Both globally-visible macros as defined by `defmacro' and local macros
+;; bound by `(cl-)macrolet' or another macro-defining form can be expanded.
+;; Within macro expansions, calls to macros and compiler macros are
+;; fontified specially: macro forms using `macrostep-macro-face', and
+;; functions with compiler macros using `macrostep-compiler-macro-face'.
+;; Uninterned symbols (gensyms) are fontified based on which step in the
+;; expansion created them, to distinguish them both from normal symbols and
+;; from other gensyms with the same print name.
 
-;;   The mode also adds some simple additional fontification to
-;;   macro-expanded code. The heads of macro sub-forms are fontified using
-;;   `macrostep-macro-face'. Uninterned symbols (gensyms) are fontified
-;;   based on which step in the expansion created them, to distinguish them
-;;   from normal symbols and from other gensyms with the same print
-;;   name. Use `customize-group' with the `macrostep' group to customize
-;;   these faces.
-
-;;   Both macros defined by `defmacro' and local macros created by
-;;   `macrolet' and `cl-macrolet' can be expanded.
+;; As of version 0.9, it is also possible to extend `macrostep' to work
+;; with other languages with macro systems in addition to Emacs Lisp.  An
+;; extension for Common Lisp (via SLIME) is in the works; contributions for
+;; other languages are welcome.  See "Extending macrostep" below for
+;; details.
 
 
-;; 2 Key-bindings and usage
+;; 1 Key-bindings and usage
 ;; ========================
 
-;;   The standard macrostep-mode keybindings are the following:
+;;   The standard keybindings in `macrostep-mode' are the following:
 
 ;;   e, =, RET : expand the macro form following point one step
 ;;   c, u, DEL : collapse the form following point
@@ -67,9 +67,9 @@
 ;;   n, TAB    : jump to the next macro form in the expansion
 ;;   p, M-TAB  : jump to the previous macro form in the expansion
 
-;;   It's not very useful to enable and disable macrostep-mode
-;;   directly. Instead, bind `macrostep-expand' to a key in
-;;   `emacs-lisp-mode-map', for example C-c e:
+;;   It's not very useful to enable and disable macrostep-mode directly.
+;;   Instead, bind `macrostep-expand' to a key in `emacs-lisp-mode-map',
+;;   for example C-c e:
 
 ;;   ,----
 ;;   | (define-key emacs-lisp-mode-map (kbd "C-c e") 'macrostep-expand)
@@ -78,63 +78,123 @@
 ;;   You can then enter macrostep-mode and expand a macro form completely
 ;;   by typing `C-c e e e ...' as many times as necessary.
 
-;;   Exit macrostep-mode either with `q', `C-c C-c', or by successively
-;;   typing `c' to collapse all expanded forms back to their original text.
+;;   Exit macrostep-mode by typing `q' or `C-c C-c', or by successively
+;;   typing `c' to collapse all surrounding expansions.
 
 
-;; 3 Expanding sub-forms
+;; 2 Customization options
+;; =======================
+
+;;   Type `M-x customize-group RET macrostep RET' to customize options and
+;;   faces.
+
+;;   To display macro expansions in a separate window, instead of inline in
+;;   the source buffer, customize `macrostep-expand-in-separate-buffer' to
+;;   `t'.  The default is `nil'.  Whichever default behavior is selected,
+;;   the alternative behavior can be obtained temporarily by giving a
+;;   prefix argument to `macrostep-expand'.
+
+;;   To have `macrostep' ignore compiler macros, customize
+;;   `macrostep-expand-compiler-macros' to `nil'.  The default is `t'.
+
+;;   Customize the faces `macrostep-macro-face',
+;;   `macrostep-compiler-macro-face', and `macrostep-gensym-1' through
+;;   `macrostep-gensym-5' to alter the appearance of macro expansions.
+
+
+;; 3 Locally-bound macros
+;; ======================
+
+;;   As of version 0.9, `macrostep' can expand calls to a locally-bound
+;;   macro, whether defined by a surrounding `(cl-)macrolet' form, or by
+;;   another macro-defining macro.  In other words, it is possible to
+;;   expand the inner `local-macro' forms in both the following examples,
+;;   whether `local-macro' is defined by an enclosing `cl-macrolet' --
+
+;;   ,----
+;;   | (cl-macrolet ((local-macro (&rest args)
+;;   |                 `(expansion of ,args)))
+;;   |   (local-macro (do-something)))
+;;   `----
+
+;;   -- or by a macro which expands into `cl-macrolet', provided that its
+;;   definition of macro is evaluated prior to calling `macrostep-expand':
+
+;;   ,----
+;;   | (defmacro with-local-macro (&rest body)
+;;   |   `(cl-macrolet ((local-macro (&rest args)
+;;   |                    `(expansion of ,args)))
+;;   |      ,@body))
+;;   | 
+;;   | (with-local-macro
+;;   |     (local-macro (do something (else)))
+;;   `----
+
+;;   See the `with-js' macro in Emacs's `js.el' for a real example of the
+;;   latter kind of macro.
+
+;;   Expansion of locally-bound macros is implemented by instrumenting
+;;   Emacs Lisp's macro-expander to capture the environment at point.  A
+;;   similar trick is used to detect macro- and compiler-macro calls within
+;;   expanded text so that they can be fontified accurately.
+
+
+;; 4 Expanding sub-forms
 ;; =====================
 
-;;   By moving point around in the macro expansion (perhaps using the `n'
-;;   and `p' keys), you can macro-expand sub-forms before fully expanding
-;;   the enclosing form. This can be useful in some cases, but you should
-;;   keep in mind that it does not correspond to the way Emacs actually
-;;   expands macro calls when evaluating or compiling your code.  Macro
-;;   expansion in Emacs Lisp always proceeds by fully expanding the outer
-;;   form to a non-macro form before doing anything with the sub-forms.
+;;   By moving point around in the macro expansion using
+;;   `macrostep-next-macro' and `macrostep-prev-macro' (bound to the `n'
+;;   and `p' keys), it is possible to expand other macro calls within the
+;;   expansion before expanding the outermost form.  This can sometimes be
+;;   useful, although it does not correspond to the real order of macro
+;;   expansion in Emacs Lisp, which proceeds by fully expanding the outer
+;;   form to a non-macro form before expanding sub-forms.
 
-;;   For example, with `cl' loaded, try expanding the following form:
-
-;;   ,----
-;;   | (dolist (l list-of-lists)
-;;   |  (incf (car l)))
-;;   `----
-
-;;   to produce the following:
-
-;;   ,----
-;;   | (block nil
-;;   |   (let
-;;   |       ((--cl-dolist-temp-- list-of-lists)
-;;   |        l)
-;;   |     (while --cl-dolist-temp--
-;;   |       (setq l
-;;   |             (car --cl-dolist-temp--))
-;;   |       (incf
-;;   |        (car l))
-;;   |       (setq --cl-dolist-temp--
-;;   |             (cdr --cl-dolist-temp--)))
-;;   |     nil))
-;;   `----
-
-;;   where the forms beginning `block' and `incf' are both macro calls.
-
-;;   At this point, you can either continue expanding the `block' form,
-;;   which corresponds to the real order of macro expansion in evaluation,
-;;   or type `n' to move point to the unexpanded `incf' and expand it to a
-;;   `callf' form and finally to a `let*' form.  If you then move point
-;;   back to the `block' and expand it, an unexpanded `incf' form appears
-;;   again in the result.  This might look visually confusing, but it does
-;;   at least correspond to the way real macro expansion works.
-
-;;   Why allow expanding sub-forms out of order like this at all? The main
-;;   reason is for debugging macros which expand into another macro, like
-;;   `lexical-let', that programmatically expands its contents in order to
-;;   rewrite them.  In this case, expanding the sub-forms first allows you
-;;   to see what `lexical-let' would compute via `cl-macroexpand-all'.
+;;   The main reason to expand sub-forms out of order is to help with
+;;   debugging macros which programmatically expand their arguments in
+;;   order to rewrite them.  Expanding the arguments of such a macro lets
+;;   you visualise what the macro definition would compute via
+;;   `macroexpand-all'.
 
 
-;; 4 Bugs and known limitations
+;; 5 Extending macrostep for other languages
+;; =========================================
+
+;;   Since version 0.9, it is possible to extend macrostep to work with
+;;   other languages besides Emacs Lisp.  In typical Emacs fashion, this is
+;;   implemented by setting buffer-local variables to different function
+;;   values.  Six buffer-local variables define the language-specific part
+;;   of the implementation:
+
+;;   - `macrostep-sexp-bounds-function'
+;;   - `macrostep-sexp-at-point-function'
+;;   - `macrostep-environment-at-point-function'
+;;   - `macrostep-expand-1-function'
+;;   - `macrostep-print-function'
+;;   - `macrostep-macro-form-p-function'
+
+;;   Typically, an implementation for another language would set these
+;;   variables in a major-mode hook.  See the docstrings of each variable
+;;   for details on how each one is called and what it should return.  At a
+;;   minimum, another language implementation needs to provide
+;;   `macrostep-sexp-at-point-function', `macrostep-expand-1-function', and
+;;   `macrostep-print-function'.  Lisp-like languages may be able to reuse
+;;   the default `macrostep-sexp-bounds-function' if they provide another
+;;   implementation of `macrostep-macro-form-p-function'.  Languages which
+;;   do not implement locally-defined macros can set
+;;   `macrostep-environment-at-point-function' to `ignore'.
+
+;;   Note that the core `macrostep' machinery only interprets the return
+;;   value of `macrostep-sexp-bounds-function', so implementations for
+;;   other languages can use any internal representations of code and
+;;   environments which is convenient.  Although the terminology is
+;;   Lisp-specific, there is no reason that implementations could not be
+;;   provided for non-Lisp languages with macro systems, provided there is
+;;   some way of identifying macro calls and calling the compiler /
+;;   preprocessor to obtain their expansions.
+
+
+;; 6 Bugs and known limitations
 ;; ============================
 
 ;;   You can evaluate and edebug macro-expanded forms and step through the
@@ -145,17 +205,10 @@
 ;;   same print name as another symbol in the expansion. It's possible that
 ;;   using `print-circle' and `print-gensym' could get around this.
 
-;;   The macro stepper doesn't bother trying to determine whether or not a
-;;   sub-form is in an evaluated position before highlighting it as a
-;;   macro. It does exclude `lambda' from treatment as a macro, since that
-;;   leads to an endless series of expansions: `(function (function
-;;   ... ))'. It would be better to recognise `function', `quote' and other
-;;   special forms using their `edebug-form-spec' property.
-
 ;;   Please send other bug reports and feature requests to the author.
 
 
-;; 5 Acknowledgements
+;; 7 Acknowledgements
 ;; ==================
 
 ;;   Thanks to:
@@ -165,17 +218,34 @@
 ;;     expanded region and properly handle backquotes.
 ;;   - Nic Ferrier for suggesting support for local definitions within
 ;;     macrolet forms
+;;   - Luís Oliveira for suggesting and implementing SLIME support
 
+;;   `macrostep' was originally inspired by J. V. Toups's 'Deep Emacs Lisp'
+;;   articles ([part 1], [part 2], [screencast]).
 
 ;;   [EmacsConf presentation] http://youtu.be/RvPFZL6NJNQ
 
+;;   [part 1]
+;;   http://dorophone.blogspot.co.uk/2011/04/deep-emacs-part-1.html
 
-;; 6 Changelog
+;;   [part 2]
+;;   http://dorophone.blogspot.co.uk/2011/04/deep-emacs-lisp-part-2.html
+
+;;   [screencast]
+;;   http://dorophone.blogspot.co.uk/2011/05/monadic-parser-combinators-in-elisp.html
+
+
+;; 8 Changelog
 ;; ===========
 
+;;   - v0.9, 2015-10-01:
+;;     - separate into Elisp-specific and generic components
+;;     - highlight and expand compiler macros
+;;     - improve local macro expansion and macro form identification by
+;;       instrumenting `macroexpand(-all)'
 ;;   - v0.8, 2014-05-29: fix a bug with printing the first element of lists
-;;   - v0.7, 2014-05-11: expand locally-defined macros within (cl-)macrolet
-;;     forms
+;;   - v0.7, 2014-05-11: expand locally-defined macros within
+;;     `(cl-)macrolet' forms
 ;;   - v0.6, 2013-05-04: better handling of quote and backquote
 ;;   - v0.5, 2013-04-16: highlight region, maintain cleaner buffer state
 ;;   - v0.4, 2013-04-07: only enter macrostep-mode on successful
@@ -215,9 +285,6 @@
 (defvar macrostep-saved-read-only nil
   "Saved value of buffer-read-only upon entering macrostep mode.")
 (make-variable-buffer-local 'macrostep-saved-read-only)
-
-(defvar macrostep-environment nil
-  "Local macro-expansion environment, including macros declared by `cl-macrolet'.")
 
 (defvar macrostep-expansion-buffer nil
   "Non-nil if the current buffer is a macro-expansion buffer.")
@@ -285,8 +352,18 @@ buffer.")
   "Face for macros in macro-expanded code."
   :group 'macrostep)
 
+(defface macrostep-compiler-macro-face
+  '((t :slant italic))
+  "Face for compiler macros in macro-expanded code."
+  :group 'macrostep)
+
 (defcustom macrostep-expand-in-separate-buffer nil
   "When non-nil, show expansions in a separate buffer instead of inline."
+  :group 'macrostep
+  :type 'boolean)
+
+(defcustom macrostep-expand-compiler-macros t
+  "When non-nil, expand compiler macros as well as `defmacro' and `macrolet' macros."
   :group 'macrostep
   :type 'boolean)
 
@@ -302,6 +379,87 @@ buffer.")
    'macrostep-gensym-1 'macrostep-gensym-2 'macrostep-gensym-3
    'macrostep-gensym-4 'macrostep-gensym-5)
   "Ring of all macrostepper faces for fontifying gensyms.")
+
+;; Other modes can enable macrostep by redefining these functions to
+;; language-specific versions.
+(defvar-local macrostep-sexp-bounds-function
+    #'macrostep-sexp-bounds
+  "Function to return the bounds of the macro form nearest point.
+
+It will be called with no arguments and should return a cons of
+buffer positions, (START . END).  It should use `save-excursion'
+to avoid changing the position of point.
+
+The default value, `macrostep-sexp-bounds', implements this for
+Emacs Lisp, and may be suitable for other Lisp-like languages.")
+
+(defvar-local macrostep-sexp-at-point-function
+    #'macrostep-sexp-at-point
+  "Function to return the macro form at point for expansion.
+
+It will be called with no arguments, with point positioned at the
+START position returned by `macrostep-sexp-bounds-function', and
+should return a value suitable for passing as the first argument
+to `macrostep-expand-1-function'.
+
+The default value, `macrostep-sexp-at-point', implements this for
+Emacs Lisp, and may be suitable for other Lisp-like languages.")
+
+(defvar-local macrostep-environment-at-point-function
+    #'macrostep-environment-at-point
+  "Function to return the local macro-expansion environment at point.
+
+It will be called with no arguments, and should return a value
+suitable for passing as the second argument to
+`macrostep-expand-1-function'.
+
+The default value, `macrostep-environment-at-point', is specific
+to Emacs Lisp.  For languages which do not implement local
+macro-expansion environments, this should be set to `ignore'
+or `(lambda () nil)'.")
+
+(defvar-local macrostep-expand-1-function
+    #'macrostep-expand-1
+  "Function to perform one step of macro-expansion.
+
+It will be called with two arguments, FORM and ENVIRONMENT, the
+return values of `macrostep-sexp-at-point-function' and
+`macrostep-environment-at-point-function' respectively.  It
+should return the result of expanding FORM by one step as a value
+which is suitable for passing as the argument to
+`macrostep-print-function'.
+
+The default value, `macrostep-expand-1', is specific to Emacs Lisp.")
+
+(defvar-local macrostep-print-function
+    #'macrostep-pp
+  "Function to pretty-print macro expansions.
+
+It will be called with two arguments, FORM and ENVIRONMENT, the
+return values of `macrostep-sexp-at-point-function' and
+`macrostep-environment-at-point-function' respectively.  It
+should insert a pretty-printed representation at point in the
+current buffer, leaving point just after the inserted
+representation, without altering any other text in the current
+buffer.
+
+The default value, `macrostep-pp', is specific to Emacs Lisp.")
+
+(defvar-local macrostep-macro-form-p-function
+    #'macrostep-macro-form-p
+  "Function to check whether a form is a macro call.
+
+It will be called with two arguments, FORM and ENVIRONMENT -- the
+return values of `macrostep-sexp-at-point-function' and
+`macrostep-environment-at-point-function' respectively -- and
+should return non-nil if FORM would undergo macro-expansion in
+ENVIRONMENT.
+
+This is called only from `macrostep-sexp-bounds', so it need not
+be provided if a different value is used for
+`macrostep-sexp-bounds-function'.
+
+The default value, `macrostep-macro-form-p', is specific to Emacs Lisp.")
 
 
 ;;; Define keymap and minor mode
@@ -374,7 +532,7 @@ quit and return to normal editing.
 
 ;;; Interactive functions
 ;;;###autoload
-(defun macrostep-expand (toggle-separate-buffer)
+(defun macrostep-expand (&optional toggle-separate-buffer)
   "Expand the Elisp macro form following point by one step.
 
 Enters `macrostep-mode' if it is not already active, making the
@@ -387,73 +545,71 @@ buffer instead of inline in the current buffer.  Setting
 `macrostep-expand-in-separate-buffer' to non-nil swaps these two
 behaviors."
   (interactive "P")
-  (let ((sexp (macrostep-sexp-at-point))
-        (macrostep-environment (macrostep-environment-at-point)))
-    (when (not (macrostep-macro-form-p sexp))
-      (condition-case nil
-	  (progn
-	    (macrostep-next-macro)
-	    (setq sexp (macrostep-sexp-at-point)))
-	(error
-	 (if (consp sexp)
-	     (error "(%s ...) is not a macro form" (car sexp))
-	   (error "Text at point is not a macro form.")))))
+  (cl-destructuring-bind (start . end)
+      (funcall macrostep-sexp-bounds-function)
+    (goto-char start)
+    (let* ((sexp (funcall macrostep-sexp-at-point-function))
+           (end (copy-marker end))
+           (text (buffer-substring start end))
+           (env (funcall macrostep-environment-at-point-function))
+           (expansion (funcall macrostep-expand-1-function sexp env)))
 
-    ;; Create a dedicated macro-expansion buffer and copy the text to
-    ;; be expanded into it, if required
-    (let ((separate-buffer-p
-           (if toggle-separate-buffer
-               (not macrostep-expand-in-separate-buffer)
-             macrostep-expand-in-separate-buffer)))
-      (when (and separate-buffer-p (not macrostep-expansion-buffer))
-        (let ((buffer
-               (get-buffer-create (generate-new-buffer-name "*macro expansion*"))))
-          (set-buffer buffer)
-          (emacs-lisp-mode)
-          (setq macrostep-expansion-buffer t)
-          (setq macrostep-outer-environment macrostep-environment)
-          (save-excursion
-            (let ((print-level nil)
-                  (print-length nil))
-              (print sexp (current-buffer))))
-          (pop-to-buffer buffer))))
-    
-    (let* ((inhibit-read-only t)
-	   (expansion (macrostep-expand-1 sexp))
-	   (existing-ol (macrostep-overlay-at-point))
-	   (macrostep-gensym-depth macrostep-gensym-depth)
-	   (macrostep-gensyms-this-level nil)
-	   text priority)
+      ;; Create a dedicated macro-expansion buffer and copy the text to
+      ;; be expanded into it, if required
+      (let ((separate-buffer-p
+             (if toggle-separate-buffer
+                 (not macrostep-expand-in-separate-buffer)
+               macrostep-expand-in-separate-buffer)))
+        (when (and separate-buffer-p (not macrostep-expansion-buffer))
+          (let ((mode major-mode)
+                (buffer
+                 (get-buffer-create (generate-new-buffer-name "*macro expansion*"))))
+            (set-buffer buffer)
+            (funcall mode)
+            (setq macrostep-expansion-buffer t)
+            (setq macrostep-outer-environment env)
+            (save-excursion
+              (setq start (point))
+              (insert text)
+              (setq end (point-marker)))
+            (pop-to-buffer buffer))))
+
       (unless macrostep-mode (macrostep-mode t))
-      (if existing-ol			; expanding an expansion
-	  (setq text sexp
-		priority (1+ (overlay-get existing-ol 'priority))
+      (let ((existing-overlay (macrostep-overlay-at-point))
+            (macrostep-gensym-depth macrostep-gensym-depth)
+            (macrostep-gensyms-this-level nil)
+            priority)
+        (if existing-overlay
+            (progn        ; Expanding part of a previous macro-expansion
+              (setq priority (1+ (overlay-get existing-overlay 'priority)))
+              (setq macrostep-gensym-depth
+                    (overlay-get existing-overlay 'macrostep-gensym-depth)))
+          ;; Expanding source buffer text
+          (setq priority 1)
+          (setq macrostep-gensym-depth -1))
 
-		macrostep-gensym-depth
-		(overlay-get existing-ol 'macrostep-gensym-depth))
-	;; expanding buffer text
-	(setq text (buffer-substring (point) (scan-sexps (point) 1))
-	      priority 1
-	      macrostep-gensym-depth -1))
-
-      (with-silent-modifications
-        (atomic-change-group
-          (macrostep-replace-sexp-at-point expansion)
-          (let ((new-ol
-                 (make-overlay (point)
-                               (scan-sexps (point) 1))))
-            ;; Move overlay over newline to make it prettier
-            (when (equal (char-after (overlay-end new-ol)) ?\n)
-              (move-overlay new-ol
-                            (overlay-start new-ol) (+ (overlay-end new-ol) 1)))
-            ;; Highlight the overlay in original source buffers only
-            (unless macrostep-expansion-buffer
-              (overlay-put new-ol 'face 'macrostep-expansion-highlight-face))
-            (overlay-put new-ol 'evaporate t)
-            (overlay-put new-ol 'priority priority)
-            (overlay-put new-ol 'macrostep-original-text text)
-            (overlay-put new-ol 'macrostep-gensym-depth macrostep-gensym-depth)
-            (push new-ol macrostep-overlays)))))))
+        (with-silent-modifications
+          (atomic-change-group
+            (let ((inhibit-read-only t))
+              (save-excursion
+                ;; Insert expansion
+                (funcall macrostep-print-function expansion env)
+                ;; Delete the original form
+                (macrostep-collapse-overlays-in (point) end)
+                (delete-region (point) end)
+                ;; Create a new overlay
+                (let ((overlay
+                       (make-overlay start
+                                     (if (looking-at "\n")
+                                         (1+ (point))
+                                       (point)))))
+                  (unless macrostep-expansion-buffer
+                    ;; Highlight the overlay in original source buffers only
+                    (overlay-put overlay 'face 'macrostep-expansion-highlight-face))
+                  (overlay-put overlay 'priority priority)
+                  (overlay-put overlay 'macrostep-original-text text)
+                  (overlay-put overlay 'macrostep-gensym-depth macrostep-gensym-depth)
+                  (push overlay macrostep-overlays))))))))))
 
 (defun macrostep-collapse ()
   "Collapse the innermost macro expansion near point to its source text.
@@ -463,7 +619,7 @@ If no more macro expansions are visible after this, exit
   (interactive)
   (let ((overlay (macrostep-overlay-at-point)))
     (when (not overlay) (error "No macro expansion at point"))
-    (let ((buffer-read-only nil))
+    (let ((inhibit-read-only t))
       (with-silent-modifications
         (atomic-change-group
           (macrostep-collapse-overlay overlay)))))
@@ -473,7 +629,7 @@ If no more macro expansions are visible after this, exit
 (defun macrostep-collapse-all ()
   "Collapse all visible macro expansions and exit `macrostep-mode'."
   (interactive)
-  (let ((buffer-read-only nil))
+  (let ((inhibit-read-only t))
     (with-silent-modifications
       (dolist (overlay macrostep-overlays)
         (let ((outermost (= (overlay-get overlay 'priority) 1)))
@@ -487,10 +643,10 @@ If no more macro expansions are visible after this, exit
   "Move point forward to the next macro form in macro-expanded text."
   (interactive)
   (let* ((start 
-	 (if (get-text-property (point) 'macrostep-expanded-text)
+	 (if (get-text-property (point) 'macrostep-macro-start)
 	     (1+ (point))
 	   (point)))
-	 (next (next-single-property-change start 'macrostep-expanded-text)))
+	 (next (next-single-property-change start 'macrostep-macro-start)))
     (if next
 	(goto-char next)
       (error "No more macro forms found"))))
@@ -503,132 +659,23 @@ If no more macro expansions are visible after this, exit
       (while
 	  (progn
 	    (setq prev
-		  (previous-single-property-change (point) 'macrostep-expanded-text))
+		  (previous-single-property-change (point) 'macrostep-macro-start))
 	    (if (or (not prev)
-		    (get-text-property (1- prev) 'macrostep-expanded-text))
+		    (get-text-property (1- prev) 'macrostep-macro-start))
 		nil
 	      (prog1 t (goto-char prev))))))
     (if prev
 	(goto-char (1- prev))
       (error "No previous macro form found"))))
 
-
 
-;;; Utility functions
-(defun macrostep-macro-form-p (form)
-  "Return t if FORM is a sexp that would be evaluated via macro expansion."
-  (if (or (not (consp form))
-	  (eq (car form) 'lambda)) 	; hack
-      nil
-    (condition-case err
-        (or
-         ;; Locally bound as a macro?
-         (assq (car form) macrostep-environment)
-         ;; Globally defined?
-         (let ((fun (indirect-function (car form))))
-           (and (consp fun)
-                (or (eq (car fun) 'macro)
-                    (and
-                     (eq (car fun) 'autoload)
-                     (eq (nth 4 fun) 'macro))))))
-      (error nil))))
-
-(defun macrostep-macro-definition (form)
-  "Return, as a function, the macro definition to apply in expanding FORM."
-  (or
-   ;; Locally bound by `macrolet'
-   (cdr (assq (car form) macrostep-environment))
-   ;; Globally defined
-   (let ((fun (indirect-function (car form))))
-     (if (consp fun)
-         (case (car fun)
-           ((macro)
-            (cdr fun))
-
-           ((autoload)
-            (load-library (nth 1 fun))
-            (macrostep-macro-definition form)))
-       (error "(%s ...) is not a macro form" form)))))
-
-(defun macrostep-expand-1 (form)
-  "Return result of macro-expanding the top level of FORM by exactly one step.
-Unlike `macroexpand', this function does not continue macro
-expansion until a non-macro-call results."
-  (if (not (macrostep-macro-form-p form)) form
-    (apply (macrostep-macro-definition form) (cdr form))))
-
-(defun macrostep-environment-at-point ()
-  "Return the local macro-expansion environment at point, if any.
-
-The local environment includes macros declared by any `macrolet'
-or `cl-macrolet' forms surrounding point.
-
-The return value is an alist of elements (NAME . FUNCTION), where
-NAME is the symbol locally bound to the macro and FUNCTION is the
-lambda expression that returns its expansion."
-  (save-excursion
-    (let
-        ((enclosing-form
-          (ignore-errors
-            (backward-up-list)
-            (read (copy-marker (point))))))
-      (pcase enclosing-form
-        (`(,(or `macrolet `cl-macrolet) ,bindings . ,_)
-          (let ((binding-environment
-                 (macrostep-bindings-to-environment bindings))
-                (enclosing-environment
-                 (macrostep-environment-at-point)))
-            (append binding-environment enclosing-environment)))
-        (`nil
-         (if macrostep-expansion-buffer
-             macrostep-outer-environment
-           nil))
-        (_
-         (macrostep-environment-at-point))))))
-
-(defun macrostep-bindings-to-environment (bindings)
-  "Return the macro-expansion environment declared by BINDINGS as an alist.
-
-BINDINGS is a list in the form expected by `macrolet' or
-`cl-macrolet'.  The return value is an alist, as described in
-`macrostep-environment-at-point'."
-  ;; So that the later elements of bindings properly shadow the
-  ;; earlier ones in the returned environment, we must reverse the
-  ;; list before mapping over it.
-  (cl-loop for (name . forms) in (reverse bindings)
-           collect
-           ;; Adapted from the definition of `cl-macrolet':
-           (let ((res (cl--transform-lambda forms name)))
-             (eval (car res))
-             (cons name `(lambda ,@(cdr res))))))
+;;; Utility functions (not language-specific)
 
 (defun macrostep-overlay-at-point ()
   "Return the innermost macro stepper overlay at point."
   (let ((result
 	 (get-char-property-and-overlay (point) 'macrostep-original-text)))
     (cdr result)))
-
-(defun macrostep-sexp-at-point ()
-  "Return the sexp near point for purposes of macro-stepper expansion.
-
-If the sexp near point is part of a macro expansion, returns the
-saved text of the macro expansion, and does not read from the
-buffer. This preserves uninterned symbols in the macro expansion,
-so that they can be colored consistently. See also
-`macrostep-print-sexp'.
-
-Also moves point to the beginning of the returned s-expression."
-  (if (not (looking-at "[(`]"))
-      (backward-up-list 1))
-  (if (equal (char-before) ?`)
-      (backward-char))
-  (or (get-text-property (point) 'macrostep-expanded-text)
-      (progn
-	;; use scan-sexps for the side-effect of producing an error
-	;; message for unbalanced parens, etc.
-	(scan-sexps (point) 1)
-	(sexp-at-point))))
-
 
 (defun macrostep-collapse-overlay (overlay &optional no-restore-p)
   "Collapse a macro-expansion overlay and restore the unexpanded source text.
@@ -639,20 +686,25 @@ collapsing all the sub-expansions of an outer overlay, since the
 outer overlay will restore the original source itself.
 
 Also removes the overlay from `macrostep-overlays'."
-  (when (and (overlay-start overlay)
-	     (eq (overlay-buffer overlay) (current-buffer)))
-      ;; If we're cleaning up we don't need to bother restoring text
-      ;; or checking for inner overlays to delete
-      (unless no-restore-p
-	(macrostep-collapse-overlays-in
-	 (overlay-start overlay) (overlay-end overlay))
-	(let ((text (overlay-get overlay 'macrostep-original-text)))
-	  (goto-char (overlay-start overlay))
-	  (macrostep-replace-sexp-at-point text (stringp text))))
-      ;; Remove overlay from the list and delete it
-      (setq macrostep-overlays
-	    (delq overlay macrostep-overlays))
-      (delete-overlay overlay)))
+  (with-current-buffer (overlay-buffer overlay)
+    ;; If we're cleaning up we don't need to bother restoring text
+    ;; or checking for inner overlays to delete
+    (unless no-restore-p
+      (let* ((start (overlay-start overlay))
+             (end (overlay-end overlay))
+             (text (overlay-get overlay 'macrostep-original-text))
+             (sexp-end
+              (copy-marker
+               (if (equal (char-before end) ?\n) (1- end) end))))
+        (macrostep-collapse-overlays-in start end)
+        (goto-char (overlay-start overlay))
+        (save-excursion
+          (insert text)
+          (delete-region (point) sexp-end))))
+    ;; Remove overlay from the list and delete it
+    (setq macrostep-overlays
+          (delq overlay macrostep-overlays))
+    (delete-overlay overlay)))
 
 (defun macrostep-collapse-overlays-in (start end)
   "Collapse all macrostepper overlays that are strictly between START and END.
@@ -664,56 +716,277 @@ Will not collapse overlays that begin at START and end at END."
 	     (overlay-get ol 'macrostep-original-text))
 	(macrostep-collapse-overlay ol t))))
 
-(defun macrostep-replace-sexp-at-point (sexp &optional original)
-  "Replace the form following point with SEXP.
+
+;;; Emacs Lisp implementation
 
-If ORIGINAL is non-nil, SEXP is assumed to be a string
-representing the original source text, and inserted verbatim as a
-replacement for the form following point. Otherwise, if ORIGINAL
-is nil, SEXP is treated as the macro expansion of the source,
-inserted using `macrostep-print-sexp' and pretty-printed using
-`pp-buffer'."
-  (let ((print-quoted t))
-    (save-excursion
-      ;; Insert new text first so that existing overlays don't
-      ;; evaporate
-      (if original
-	  (insert sexp)                 ; insert original source text
-	(macrostep-print-sexp sexp))
-      ;; Delete the old form and remove any sub-form overlays in it
-      (let ((start (point)) (end (scan-sexps (point) 1)))
-	(macrostep-collapse-overlays-in start end)
-	(delete-region start end)))
-	
-    (unless original                   ; inserting macro expansion
+(defun macrostep-sexp-bounds ()
+  "Find the bounds of the macro form nearest point.
+
+If point is not before an open-paren, moves up to the nearest
+enclosing list.  If the form at point is not a macro call,
+attempts to move forward to the next macro form as determined by
+`macrostep-macro-form-p-function'.
+
+Returns a cons of buffer positions, (START . END)."
+  (save-excursion
+    (if (not (looking-at "[(`]"))
+        (backward-up-list 1))
+    (if (equal (char-before) ?`)
+        (backward-char))
+    (let ((sexp (funcall macrostep-sexp-at-point-function))
+          (env (funcall macrostep-environment-at-point-function)))
+      ;; If this isn't a macro form, try to find the next one in the buffer
+      (unless (funcall macrostep-macro-form-p-function sexp env)
+        (condition-case nil
+            (macrostep-next-macro)
+          (error
+           (if (consp sexp)
+               (error "(%s ...) is not a macro form" (car sexp))
+             (error "Text at point is not a macro form."))))))
+    (cons (point) (scan-sexps (point) 1))))
+
+(defun macrostep-sexp-at-point ()
+  "Return the sexp near point for purposes of macro-stepper expansion.
+
+If the sexp near point is part of a macro expansion, returns the
+saved text of the macro expansion, and does not read from the
+buffer.  This preserves uninterned symbols in the macro
+expansion, so that they can be fontified consistently.  (See
+`macrostep-print-sexp'.)"
+  (or (get-text-property (point) 'macrostep-expanded-text)
+      (sexp-at-point)))
+
+(defun macrostep-macro-form-p (form environment)
+  "Return non-nil if FORM would be evaluated via macro expansion.
+
+If FORM is an invocation of a macro defined by `defmacro' or an
+enclosing `cl-macrolet' form, return the symbol `macro'.
+
+If `macrostep-expand-compiler-macros' is non-nil and FORM is a
+call to a function with a compiler macro, return the symbol
+`compiler-macro'.
+
+Otherwise, return nil."
+  (car (macrostep--macro-form-info form environment t)))
+
+(defun macrostep--macro-form-info (form environment &optional inhibit-autoload)
+  "Return information about macro definitions that apply to FORM.
+
+If no macros are involved in the evaluation of FORM within
+ENVIRONMENT, returns nil.  Otherwise, returns a cons (TYPE
+. DEFINITION).
+
+If FORM would be evaluated by a macro defined by `defmacro',
+`cl-macrolet', etc., TYPE is the symbol `macro' and DEFINITION is
+the macro definition, as a function.
+
+If `macrostep-expand-compiler-macros' is non-nil and FORM would
+be compiled using a compiler macro, TYPE is the symbol
+`compmiler-macro' and DEFINITION is the function that implements
+the compiler macro.
+
+If FORM is an invocation of an autoloaded macro, the behavior
+depends on the value of INHIBIT-AUTOLOAD.  If INHIBIT-AUTOLOAD is
+nil, the file containing the macro definition will be loaded
+using `load-library' and the macro definition returned as normal.
+If INHIBIT-AUTOLOAD is non-nil, no files will be loaded, and the
+value of DEFINITION in the result will be nil."
+  (pcase form
+    (`(,(and (pred symbolp) head) . ,_)
+      (let ((macrolet-definition
+             (assoc-default head environment 'eq)))
+        (if macrolet-definition
+            `(macro . ,macrolet-definition)
+          (let ((compiler-macro-definition
+                 (and macrostep-expand-compiler-macros
+                      (get head 'compiler-macro))))
+            (if compiler-macro-definition
+                `(compiler-macro . ,compiler-macro-definition)
+              (condition-case _
+                  (let ((fun (indirect-function head)))
+                    (pcase fun
+                      (`(macro . ,definition)
+                        `(macro . ,definition))
+                      (`(autoload ,_ ,_ ,_ macro . ,_)
+                        (if inhibit-autoload
+                            `(macro)
+                          (autoload-do-load fun)
+                          (macrostep--macro-form-info form nil)))
+                      (_ nil)))
+                (void-function nil)))))))
+    (_ nil)))
+
+(defun macrostep-expand-1 (form environment)
+  "Return result of macro-expanding the top level of FORM by exactly one step.
+Unlike `macroexpand', this function does not continue macro
+expansion until a non-macro-call results."
+  (pcase (macrostep--macro-form-info form environment)
+    (`nil form)
+    (`(macro . ,definition)
+     (apply definition (cdr form)))
+    (`(compiler-macro . ,definition)
+     (let ((expansion
+            (apply definition form (cdr form))))
+       (if (equal form expansion)
+           (error "Form left unchanged by compiler macro")
+         expansion)))))
+
+(define-error 'macrostep-grab-environment-failed
+    "Extracting the macro environment at point failed.")
+
+(defun macrostep-environment-at-point ()
+  "Return the local macro-expansion environment at point, if any.
+
+The local environment includes macros declared by any `macrolet'
+or `cl-macrolet' forms surrounding point, as well as by any macro
+forms which expand into a `macrolet'.
+
+The return value is an alist of elements (NAME . FUNCTION), where
+NAME is the symbol locally bound to the macro and FUNCTION is the
+lambda expression that returns its expansion."
+  ;; If point is on a macro form within an expansion inserted by
+  ;; `macrostep-print-sexp', a local environment may have been
+  ;; previously saved as a text property.
+  (let ((saved-environment
+         (get-text-property (point) 'macrostep-environment)))
+    (if saved-environment
+        saved-environment
+      ;; Otherwise, we (ab)use the macro-expander to return the
+      ;; environment at point.  If point is not at an evaluated
+      ;; position in the containing form,
+      ;; `macrostep-environment-at-point-1' will raise an error, and
+      ;; we back up progressively through the containing forms until
+      ;; it succeeds.
+      (cl-flet ((move-backward ()
+                  (condition-case nil
+                      (backward-sexp)
+                    (scan-error (backward-up-list)))))
+        (save-excursion
+          (catch 'done
+            (while t
+              (condition-case nil
+                  (throw 'done (macrostep-environment-at-point-1))
+                (macrostep-grab-environment-failed
+                 (move-backward))))))))))
+
+(defun macrostep-environment-at-point-1 ()
+  "Attempt to extract the macro environment that would be active at point.
+
+If point is not at an evaluated position within the containing
+form, raise an error."
+  ;; Macro environments are extracted using Emacs Lisp's builtin
+  ;; macro-expansion machinery.  The form containing point is copied
+  ;; to a temporary buffer, and a call to
+  ;; `--macrostep-grab-environment--' is inserted at point.  This
+  ;; altered form is then fully macro-expanded, in an environment
+  ;; where `--macrostep-grab-environment--' is defined as a macro
+  ;; which throws the environment to a uniquely-generated tag.
+  (let* ((point-at-top-level
+          (save-excursion
+            (while (ignore-errors (backward-up-list) t))
+            (point)))
+         (enclosing-form
+          (buffer-substring point-at-top-level
+                            (scan-sexps point-at-top-level 1)))
+         (position (- (point) point-at-top-level))
+         (tag (make-symbol "macrostep-grab-environment-tag"))
+         (grab-environment '--macrostep-grab-environment--))
+    (if (= position 0)
+        nil
+      (with-temp-buffer
+        (emacs-lisp-mode)
+        (insert enclosing-form)
+        (goto-char (+ (point-min) position))
+        (prin1 `(,grab-environment) (current-buffer))
+        (let ((form (read (copy-marker (point-min)))))
+          (catch tag
+            (cl-letf (((symbol-function #'message) (symbol-function #'format)))
+              (with-no-warnings
+                (ignore-errors
+                  (macroexpand-all
+                   `(cl-macrolet ((,grab-environment (&environment env)
+                                    (throw ',tag env)))
+                      ,form)))))
+            (signal 'macrostep-grab-environment-failed nil)))))))
+
+(defun macrostep-collect-macro-forms (form &optional environment)
+  "Identify sub-forms of FORM which undergo macro-expansion.
+
+FORM is an Emacs Lisp form. ENVIRONMENT is a local environment of
+macro definitions.
+
+The return value is a list of two elements, (MACRO-FORM-ALIST
+COMPILER-MACRO-FORMS).
+
+MACRO-FORM-ALIST is an alist of elements of the form (SUBFORM
+. ENVIRONMENT), where SUBFORM is a form which undergoes
+macro-expansion in the course of expanding FORM, and ENVIRONMENT
+is the local macro environment in force when it is expanded.
+
+COMPILER-MACRO-FORMS is a list of subforms which would be
+compiled using a compiler macro.  Since there is no standard way
+to provide a local compiler-macro definition in Emacs Lisp, no
+corresponding local environments are collected for these.
+
+Forms and environments are extracted from FORM by instrumenting
+Emacs's builtin `macroexpand' function and calling
+`macroexpand-all'."
+  (let ((real-macroexpand (indirect-function #'macroexpand))
+        (macro-form-alist '())
+        (compiler-macro-forms '()))
+    (cl-letf
+        (((symbol-function #'macroexpand)
+          (lambda (form environment &rest args)
+            (let ((expansion
+                   (apply real-macroexpand form environment args)))
+              (cond ((not (eq expansion form))
+                     (setq macro-form-alist
+                           (cons (cons form environment)
+                                 macro-form-alist)))
+                    ((and (consp form)
+                          (symbolp (car form))
+                          macrostep-expand-compiler-macros
+                          (not (eq form
+                                   (cl-compiler-macroexpand form))))
+                     (setq compiler-macro-forms
+                           (cons form compiler-macro-forms))))
+              expansion))))
+      (ignore-errors
+        (macroexpand-all form environment)))
+    (list macro-form-alist compiler-macro-forms)))
+
+(defvar macrostep-collected-macro-form-alist nil
+  "An alist of macro forms and environments.
+Controls the printing of sub-forms in `macrostep-print-sexp'.")
+
+(defvar macrostep-collected-compiler-macro-forms nil
+  "A list of compiler-macro forms to be highlighted in `macrostep-print-sexp'.")
+
+(defun macrostep-pp (sexp environment)
+  "Pretty-print SEXP, fontifying macro forms and uninterned symbols."
+  (cl-destructuring-bind
+        (macrostep-collected-macro-form-alist
+         macrostep-collected-compiler-macro-forms)
+      (macrostep-collect-macro-forms sexp environment)
+    (let ((print-quoted t))
+      (macrostep-print-sexp sexp)
+      ;; Point is now after the expanded form; pretty-print it
       (save-restriction
-        ;; point is now before the expanded form; pretty-print it
-        (narrow-to-region (point) (scan-sexps (point) 1))
+        (narrow-to-region (scan-sexps (point) -1) (point))
         (save-excursion
           (pp-buffer)
-          ;; remove the extra newline that pp-buffer inserts
+          ;; Remove the extra newline inserted by pp-buffer
           (goto-char (point-max))
           (delete-region
            (point)
            (save-excursion (skip-chars-backward " \t\n") (point))))
+        ;; Indent the newly-inserted form in context
         (widen)
-        (indent-sexp)))))
+        (save-excursion
+          (backward-sexp)
+          (indent-sexp))))))
 
-(defun macrostep-get-gensym-face (symbol)
-  "Return the face to use in fontifying SYMBOL in printed macro expansions.
-
-All symbols introduced in the same level of macro expansion are
-fontified using the same face (modulo the number of faces; see
-`macrostep-gensym-faces')."
-  (or (get symbol 'macrostep-gensym-face)
-      (progn
-	(if (not macrostep-gensyms-this-level)
-	    (setq macrostep-gensym-depth (1+ macrostep-gensym-depth)
-		  macrostep-gensyms-this-level t))
-	(let ((face (ring-ref macrostep-gensym-faces macrostep-gensym-depth)))
-	  (put symbol 'macrostep-gensym-face face)
-	  face))))
-
+;; This must be defined before `macrostep-print-sexp':
 (defmacro macrostep-propertize (form &rest plist)
   "Evaluate FORM, applying syntax properties in PLIST to any inserted text."
   (declare (indent 1)
@@ -726,16 +999,19 @@ fontified using the same face (modulo the number of faces; see
                  collect `(put-text-property ,start (point)
                                              ,key ,value))))))
 
-(defun macrostep-print-sexp (sexp &optional quoted-form-p)
-  "Pretty-print SEXP, a macro expansion, in the current buffer.
+(defun macrostep-print-sexp (sexp)
+  "Insert SEXP like `print', fontifying macro forms and uninterned symbols.
 
 Fontifies uninterned symbols and macro forms using
 `font-lock-face' property, and saves the actual text of SEXP's
 sub-forms as the `macrostep-expanded-text' text property so that
 any uninterned symbols can be reused in macro expansions of the
-sub-forms.  If QUOTED-FORM-P is non-nil then any macros in the
-expansion will not be fontified.  See also
-`macrostep-sexp-at-point'."
+sub-forms.  See also `macrostep-sexp-at-point'.
+
+Macro and compiler-macro forms within SEXP are identified by
+comparison with the `macrostep-collected-macro-form-alist' and
+`macrostep-collected-compiler-macro-forms' variables, which
+should be dynamically let-bound around calls to this function."
   (cond
    ((symbolp sexp)
     ;; Fontify gensyms
@@ -752,16 +1028,18 @@ expansion will not be fontified.  See also
       (cond ((and (eq head 'quote)	; quote
 		  (= (length sexp) 2))
 	     (insert "'")
-	     (macrostep-print-sexp (cadr sexp) t))
+	     (macrostep-print-sexp (cadr sexp)))
 
             ((and (eq head '\`)         ; backquote
                   (= (length sexp) 2))
-             ;; Treat backquote as a macro
-             (macrostep-propertize
-                 (insert "`")
-               'macrostep-expanded-text sexp
-               'font-lock-face 'macrostep-macro-face)
-             (macrostep-print-sexp (cadr sexp) t))
+             (if (assq sexp macrostep-collected-macro-form-alist)
+                 (macrostep-propertize
+                     (insert "`")
+                   'macrostep-expanded-text sexp
+                   'macrostep-macro-start t
+                   'font-lock-face 'macrostep-macro-face)
+               (insert "`"))
+             (macrostep-print-sexp (cadr sexp)))
 
 	    ((and (memq head '(\, \,@)) ; unquote
 		  (= (length sexp) 2))
@@ -769,64 +1047,63 @@ expansion will not be fontified.  See also
 	     (macrostep-print-sexp (cadr sexp)))
 
 	    (t				; other list form
-             ;; If the sexp is a (cl-)macrolet form, the
-             ;; macro-expansion environment should be extended using
-             ;; its bindings while printing the body forms in order to
-             ;; correctly mark any uses of locally-bound macros. (See
-             ;; `with-js' in `js.el.gz' for an example of a macro that
-             ;; works this way).
-             (let ((extended-environment
-                    (pcase sexp
-                      (`(,(or `cl-macrolet `macrolet) ,bindings . ,_)
-                        (append (macrostep-bindings-to-environment bindings)
-                                macrostep-environment))
-                      (_ macrostep-environment))))
-               
-               ;; Is it an (unquoted) macro form?
-               (if (and (not quoted-form-p)
-                        (macrostep-macro-form-p sexp))
+             (pcase-let
+                 ((`(,macro? . ,environment)
+                    (assq sexp macrostep-collected-macro-form-alist))
+                  (compiler-macro?
+                   (memq sexp macrostep-collected-compiler-macro-forms)))
+               (if (or macro? compiler-macro?)
                    (progn
                      ;; Save the real expansion as a text property on the
                      ;; opening paren
                      (macrostep-propertize
                          (insert "(")
-                       'macrostep-expanded-text sexp)
+                       'macrostep-macro-start t
+                       'macrostep-expanded-text sexp
+                       'macrostep-environment environment)
                      ;; Fontify the head of the macro
                      (macrostep-propertize
                          (macrostep-print-sexp head)
-                       'font-lock-face 'macrostep-macro-face))
+                       'font-lock-face
+                       (if macro?
+                           'macrostep-macro-face
+                         'macrostep-compiler-macro-face)))
                  ;; Not a macro form
                  (insert "(")
-                 (macrostep-print-sexp head quoted-form-p))
+                 (macrostep-print-sexp head)))
 
-               ;; Print remaining list elements
-               (setq sexp (cdr sexp))
-               (when sexp (insert " "))
-               ;; macrostep-environment will be setq'd after printing
-               ;; the second element of the list (i.e., the binding
-               ;; list in a macrolet form)
-               (let ((macrostep-environment macrostep-environment))
-                 (while sexp
-                   (if (listp sexp)
-                       (progn
-                         (macrostep-print-sexp (car sexp) quoted-form-p)
-                         (when (cdr sexp) (insert " "))
-                         (setq sexp (cdr sexp))
-                         ;; At this point the first and second
-                         ;; elements of the list have been printed, so
-                         ;; it is time to extend the macro-expansion
-                         ;; environment inside a macrolet for the body
-                         ;; forms.
-                         (setq macrostep-environment extended-environment))
-                     ;; Print tail of dotted list
-                     (insert ". ")
-                     (macrostep-print-sexp sexp)
-                     (setq sexp nil))))
-               (insert ")"))))))
+             ;; Print remaining list elements
+             (setq sexp (cdr sexp))
+             (when sexp (insert " "))
+             (while sexp
+               (if (listp sexp)
+                   (progn
+                     (macrostep-print-sexp (car sexp))
+                     (when (cdr sexp) (insert " "))
+                     (setq sexp (cdr sexp)))
+                 ;; Print tail of dotted list
+                 (insert ". ")
+                 (macrostep-print-sexp sexp)
+                 (setq sexp nil)))
+             (insert ")")))))
 
    ;; Print everything except symbols and lists as normal
    (t (prin1 sexp (current-buffer)))))
 
+(defun macrostep-get-gensym-face (symbol)
+  "Return the face to use in fontifying SYMBOL in printed macro expansions.
+
+All symbols introduced in the same level of macro expansion are
+fontified using the same face (modulo the number of faces; see
+`macrostep-gensym-faces')."
+  (or (get symbol 'macrostep-gensym-face)
+      (progn
+	(if (not macrostep-gensyms-this-level)
+	    (setq macrostep-gensym-depth (1+ macrostep-gensym-depth)
+		  macrostep-gensyms-this-level t))
+	(let ((face (ring-ref macrostep-gensym-faces macrostep-gensym-depth)))
+	  (put symbol 'macrostep-gensym-face face)
+	  face))))
 
 
 (provide 'macrostep)
