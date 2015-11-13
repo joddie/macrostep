@@ -798,7 +798,9 @@ value of DEFINITION in the result will be nil."
           (let ((compiler-macro-definition
                  (and macrostep-expand-compiler-macros
                       (get head 'compiler-macro))))
-            (if compiler-macro-definition
+            (if (and compiler-macro-definition
+                     (not (eq form
+                              (apply compiler-macro-definition form (cdr form)))))
                 `(compiler-macro . ,compiler-macro-definition)
               (condition-case _
                   (let ((fun (indirect-function head)))
