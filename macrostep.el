@@ -395,10 +395,10 @@ Emacs Lisp, and may be suitable for other Lisp-like languages.")
     #'macrostep-sexp-at-point
   "Function to return the macro form at point for expansion.
 
-It will be called with no arguments, with point positioned at the
-START position returned by `macrostep-sexp-bounds-function', and
-should return a value suitable for passing as the first argument
-to `macrostep-expand-1-function'.
+It will be called with two arguments, the values of START and END
+returned by `macrostep-sexp-bounds-function', and with point
+positioned at START.  It should return a value suitable for
+passing as the first argument to `macrostep-expand-1-function'.
 
 The default value, `macrostep-sexp-at-point', implements this for
 Emacs Lisp, and may be suitable for other Lisp-like languages.")
@@ -546,7 +546,7 @@ behaviors."
   (cl-destructuring-bind (start . end)
       (funcall macrostep-sexp-bounds-function)
     (goto-char start)
-    (let* ((sexp (funcall macrostep-sexp-at-point-function))
+    (let* ((sexp (funcall macrostep-sexp-at-point-function start end))
            (end (copy-marker end))
            (text (buffer-substring start end))
            (env (funcall macrostep-environment-at-point-function))
@@ -743,7 +743,7 @@ Returns a cons of buffer positions, (START . END)."
              (error "Text at point is not a macro form."))))))
     (cons (point) (scan-sexps (point) 1))))
 
-(defun macrostep-sexp-at-point ()
+(defun macrostep-sexp-at-point (&rest ignore)
   "Return the sexp near point for purposes of macro-stepper expansion.
 
 If the sexp near point is part of a macro expansion, returns the
