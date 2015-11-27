@@ -1,17 +1,17 @@
 EMACS ?= emacs
 
-all: macrostep.elc
+all: macrostep.elc macrostep-c.elc
 
 clean:
-	rm -f macrostep.elc macrostep-test.elc
+	rm -f *.elc
 
-test: macrostep.elc
+test: all
 	$(EMACS) --batch -L . --load macrostep-test.el
 
-sandbox: macrostep.elc
-	$(EMACS) -Q -L . --load macrostep.elc
+sandbox: all
+	$(EMACS) -Q -L . --load macrostep.elc --load macrostep-c.elc
 
 %.elc: %.el
-	$(EMACS) --batch --funcall batch-byte-compile "$<"
+	$(EMACS) --batch -L . --funcall batch-byte-compile "$<"
 
 .PHONY: test all clean

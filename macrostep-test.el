@@ -1,6 +1,6 @@
 ;;; macrostep-test.el --- tests for macrostep.el
 
-;; Copyright (C) 2014 Jon Oddie <j.j.oddie@gmail.com>
+;; Copyright (C) 2014-2015 Jon Oddie <j.j.oddie@gmail.com>
 
 ;; This file is NOT part of GNU Emacs.
 
@@ -16,6 +16,11 @@
 ;;
 ;; You should have received a copy of the GNU General Public License
 ;; along with this program.  If not, see `http://www.gnu.org/licenses/'.
+
+(require 'ert)
+(require 'macrostep)
+(require 'macrostep-c)
+(require 'cl-lib)
 
 
 ;;;; Conveniences for defining tests
@@ -336,9 +341,70 @@
         (should (equal (read (copy-marker (point)))
                        '(dummy-macro-2 (some (arguments)))))))))
 
+
+;;;; Tests for C macro expansion
+
+(defun macrostep-lax-looking-at (string)
+  (let* ((string-sans-whitespace
+          (replace-regexp-in-string (rx (one-or-more whitespace)) "" string))
+         (regexp
+          (cl-loop
+           for char across string-sans-whitespace
+           concat (rx-to-string char t)
+           concat "[[:space:]]*")))
+    (looking-at regexp)))
+
+(defmacro macrostep-lax-should-expand (string)
+  `(progn
+     (macrostep-expand)
+     (should (macrostep-lax-looking-at ,string))
+     (macrostep-collapse)))
+
+(ert-deftest macrostep-expand-c-macros ()
+  (with-temp-buffer
+    (insert
+     ;; A random example adapted from Emacs's src/lisp.h.
+     "
+#define eassert(cond) ((void) (false && (cond))) /* Check COND compiles.  */
+#define lisp_h_XLI(o) (o)
+#define lisp_h_XUNTAG(a, type) ((void *) (intptr_t) (XLI (a) - (type)))
+#define XLI(o) lisp_h_XLI (o)
+#define XUNTAG(a, type) lisp_h_XUNTAG (a, type)
+
+INLINE struct Lisp_String *
+XSTRING (Lisp_Object a)
+{
+  eassert (STRINGP (a));
+  return XUNTAG (a, Lisp_String);
+}")
+    (c-mode)
+
+     ;; Test macro-expansion with point at the beginning of the macro
+    (macrostep-goto "eassert (STRINGP (a))" t)
+    (macrostep-lax-should-expand
+     "((void) (false && (STRINGP (a))))")
+
+    ;; Test with point inside a nested macro call: result should be
+    ;; the same, since point will move up before the outermost macro
+    (macrostep-goto "STRINGP")
+    (macrostep-lax-should-expand
+     "((void) (false && (STRINGP (a))))")
+
+    ;; Test with point in the middle of a symbol
+    (macrostep-goto "XUNTAG (a, Lisp_String)" t)
+    (forward-char 3)
+    (macrostep-lax-should-expand
+     "((void *) (intptr_t) ((a) - (  Lisp_String)))")
+
+    ;; Test with point at symbol-end
+    (macrostep-goto "XUNTAG (a, Lisp_String)" t)
+    (forward-sexp)
+    (macrostep-lax-should-expand
+     "((void *) (intptr_t) ((a) - (  Lisp_String)))")))
+
+
+
 (when noninteractive
   (load-file (expand-file-name "macrostep.el"
                                (file-name-directory load-file-name)))
   (ert-run-tests-batch "^macrostep"))
-
-
