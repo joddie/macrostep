@@ -282,15 +282,15 @@
     `(cl-macrolet ((dummy (&rest args) `(expansion (of) ,@args)))
        ,@body))
   (macrostep-with-text
-   '(with-local-dummy-macro
-     (dummy form (one))
-     (dummy (form two)))
-   (macrostep-should-expand
-    '(dummy form (one))
-    '(expansion (of) form (one)))
-   (macrostep-should-expand
-    '(dummy (form two))
-    '(expansion (of) (form two)))))
+      '(with-local-dummy-macro
+        (dummy form (one))
+        (dummy (form two)))
+    (macrostep-should-expand
+     '(dummy form (one))
+     '(expansion (of) form (one)))
+    (macrostep-should-expand
+     '(dummy (form two))
+     '(expansion (of) (form two)))))
 
 (ert-deftest macrostep-expand-in-separate-buffer ()
   (defmacro macrostep-dummy-macro (&rest args)
