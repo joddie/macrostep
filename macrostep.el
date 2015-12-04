@@ -831,8 +831,8 @@ expansion until a non-macro-call results."
            (error "Form left unchanged by compiler macro")
          expansion)))))
 
-(define-error 'macrostep-grab-environment-failed
-    "Extracting the macro environment at point failed.")
+(put 'macrostep-grab-environment-failed 'error-conditions
+     '(macrostep-grab-environment-failed error))
 
 (defun macrostep-environment-at-point ()
   "Return the local macro-expansion environment at point, if any.
