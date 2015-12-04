@@ -161,6 +161,12 @@
         (mapcar #'string-trim (list expansion warnings))))))
 
 (defun macrostep-c-print-function (expansion &rest _ignore)
+  (with-temp-buffer
+    (insert expansion)
+    (let ((exit-code
+           (shell-command-on-region (point-min) (point-max) "indent" nil t)))
+      (when (zerop exit-code)
+        (setq expansion (string-trim (buffer-string))))))
   (insert expansion))
 
 (provide 'macrostep-c)
