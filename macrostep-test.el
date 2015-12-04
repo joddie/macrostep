@@ -20,7 +20,6 @@
 (require 'ert)
 (require 'macrostep)
 (require 'macrostep-c)
-(require 'cl-lib)
 
 
 ;;;; Conveniences for defining tests
@@ -103,7 +102,7 @@
 
 (ert-deftest macrostep-expand-macrolet ()
   (macrostep-with-text
-      '(macrolet
+      '(cl-macrolet
         ((test (&rest args) `(expansion of ,@args)))
         (first body form)
         (second body form)
@@ -116,7 +115,7 @@
 (ert-deftest macrostep-expand-macrolet-2 ()
   (macrostep-with-text
       ;; Taken from org-notify.el.
-      '(macrolet ((get (k) `(plist-get list ,k))
+      '(cl-macrolet ((get (k) `(plist-get list ,k))
                   (pr (k v) `(setq result (plist-put result ,k ,v))))
         (let* ((list (nth 1 heading))      (notify (or (get :notify) "default"))
                (deadline (org-notify-convert-deadline (get :deadline)))
@@ -170,7 +169,7 @@
 
 (ert-deftest macrostep-expand-shadowed-macrolet ()
   (macrostep-with-text
-      '(macrolet
+      '(cl-macrolet
         ((test-macro (&rest forms) (cons 'shadowed forms))
          (test-macro (&rest forms) (cons 'outer-definition forms)))
         (test-macro first (call))
@@ -187,7 +186,7 @@
 (ert-deftest macrostep-environnment-at-point ()
   (macrostep-with-text
       ;; Taken from org-notify.el.
-      '(macrolet ((get (k) `(plist-get list ,k))
+      '(cl-macrolet ((get (k) `(plist-get list ,k))
                   (pr (k v) `(setq result (plist-put result ,k ,v))))
         (body forms))
     (search-forward "(body")
@@ -255,10 +254,10 @@
   (with-temp-buffer
     (emacs-lisp-mode)
     (macrostep-pp
-     '(macrolet ((some-macro (&rest forms) (cons 'progn forms)))
-       (some-macro with (arguments))
-       (intervening body forms)
-       (some-macro with (more) (arguments)))
+     '(cl-macrolet ((some-macro (&rest forms) (cons 'progn forms)))
+	(some-macro with (arguments))
+	(intervening body forms)
+	(some-macro with (more) (arguments)))
      nil)
     (cl-flet ((search (text)
                 (macrostep-goto text t)

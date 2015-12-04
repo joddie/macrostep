@@ -1,14 +1,15 @@
 ;;; macrostep.el --- interactive macro expander
 
-;; Copyright (C) 2012-2015 Jonathan Oddie <j.j.oddie@gmail.com>
+;; Copyright (C) 2012-2015 Jon Oddie <j.j.oddie@gmail.com>
 
 ;; Author:     joddie <j.j.oddie@gmail.com>
 ;; Maintainer: joddie <j.j.oddie@gmail.com>
 ;; Created:    16 January 2012
-;; Updated:    01 October 2015
+;; Updated:    04 December 2015
 ;; Version:    0.9
 ;; Keywords:   lisp, languages, macro, debugging
 ;; Url:        https://github.com/joddie/macrostep
+;; Package-Requires: ((emacs "24") (cl-lib "0.5"))
 
 ;; This file is NOT part of GNU Emacs.
 
@@ -255,11 +256,10 @@
 
 ;;; Code:
 
-;; We use `pp-buffer' to pretty-print macro expansions
 (require 'pp)
 (require 'ring)
+(require 'cl-lib)
 (eval-when-compile
-  (require 'cl)
   (require 'pcase))
 
 
@@ -995,9 +995,9 @@ Controls the printing of sub-forms in `macrostep-print-sexp'.")
     `(let ((,start (point)))
        (prog1
            ,form
-         ,@(loop for (key value) on plist by #'cddr
-                 collect `(put-text-property ,start (point)
-                                             ,key ,value))))))
+         ,@(cl-loop for (key value) on plist by #'cddr
+                    collect `(put-text-property ,start (point)
+                                                ,key ,value))))))
 
 (defun macrostep-print-sexp (sexp)
   "Insert SEXP like `print', fontifying macro forms and uninterned symbols.
