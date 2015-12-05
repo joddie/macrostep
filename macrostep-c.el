@@ -49,14 +49,27 @@
 
 (require 'macrostep)
 (require 'cmacexp)
-(require 'subr-x)                       ; string-trim
 (require 'cl-lib)
 
-(define-error 'macrostep-c-non-macro
-    "Text around point is not a macro call.")
+(eval-and-compile
+  (if (require 'subr-x nil t)
+      (defalias 'macrostep-c-string-trim 'string-trim)
+    (defun macrostep-c-string-trim (string)
+      (when (string-match "\\`[ \t\n\r]+" string)
+	(setq string (replace-match "" t t string)))
+      (when (string-match "[ \t\n\r]+\\'" string)
+	(setq string (replace-match "" t t string)))
+	string)))
 
-(define-error 'macrostep-c-expansion-failed
-    "Macro-expansion failed.")
+(put 'macrostep-c-non-macro 'error-conditions
+     '(macrostep-c-non-macro error))
+(put 'macrostep-c-non-macro 'error-message
+     "Text around point is not a macro call.")
+
+(put 'macrostep-c-expansion-failed 'error-conditions
+     '(macrostep-c-expansion-failed error))
+(put 'macrostep-c-expansion-failed 'error-message
+     "Macro-expansion failed.")
 
 (defvar macrostep-c-warning-buffer "*Macroexpansion Warnings*")
 
@@ -158,7 +171,7 @@
         (search-forward "*/"))
       (let ((warnings (buffer-substring (point-min) (point)))
             (expansion (buffer-substring (point) (point-max))))
-        (mapcar #'string-trim (list expansion warnings))))))
+        (mapcar #'macrostep-c-string-trim (list expansion warnings))))))
 
 (defun macrostep-c-print-function (expansion &rest _ignore)
   (with-temp-buffer
@@ -166,7 +179,7 @@
     (let ((exit-code
            (shell-command-on-region (point-min) (point-max) "indent" nil t)))
       (when (zerop exit-code)
-        (setq expansion (string-trim (buffer-string))))))
+        (setq expansion (macrostep-c-string-trim (buffer-string))))))
   (insert expansion))
 
 (provide 'macrostep-c)

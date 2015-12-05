@@ -17,7 +17,11 @@
 ;; You should have received a copy of the GNU General Public License
 ;; along with this program.  If not, see `http://www.gnu.org/licenses/'.
 
-(require 'ert)
+
+(eval-and-compile
+  (require 'ert nil t)
+  (require 'ert "lib/ert"))
+(require 'rx)
 (require 'macrostep)
 (require 'macrostep-c)
 
@@ -38,8 +42,8 @@
 
 (defun macrostep-goto (text &optional from-point-min)
   (when from-point-min (goto-char (point-min)))
-  (let ((search-whitespace-regexp "[[:space:]\n]+"))
-    (search-forward-lax-whitespace text)
+  (let ((search-spaces-regexp "[[:space:]\n]+"))
+    (re-search-forward (regexp-quote text))
     (goto-char (match-beginning 0))))
 
 (defmacro macrostep-should-expand (form expansion)
@@ -259,7 +263,7 @@
 	(intervening body forms)
 	(some-macro with (more) (arguments)))
      nil)
-    (cl-flet ((search (text)
+    (cl-labels ((search (text)
                 (macrostep-goto text t)
                 ;; Leave point on the head of the form
                 (forward-char)))
