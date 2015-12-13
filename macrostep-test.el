@@ -46,7 +46,7 @@
     (re-search-forward (regexp-quote text))
     (goto-char (match-beginning 0))))
 
-(defmacro macrostep-should-expand (form expansion)
+(defmacro macrostep-should-expand (form expansion &optional leave-expanded-p)
   `(save-excursion
      (goto-char (point-min))
      (let ((print-level nil)
@@ -59,7 +59,8 @@
               (should
                (equal (read (current-buffer))
                       ,expansion)))
-         (macrostep-collapse-all)))))
+	 (unless ,leave-expanded-p
+	   (macrostep-collapse-all))))))
 
 
 ;;;; Tests
@@ -187,7 +188,7 @@
      '(test-macro (second (call)))
      '(inner-definition (second (call))))))
 
-(ert-deftest macrostep-environnment-at-point ()
+(ert-deftest macrostep-environment-at-point ()
   (macrostep-with-text
       ;; Taken from org-notify.el.
       '(cl-macrolet ((get (k) `(plist-get list ,k))
@@ -343,6 +344,52 @@
         (macrostep-collapse)
         (should (equal (read (copy-marker (point)))
                        '(dummy-macro-2 (some (arguments)))))))))
+
+(ert-deftest macrostep-expand-compiler-macros ()
+  "Test that compiler-macros are expanded"
+  ;; definitions
+  (defun macrostep-dummy-function (&rest args)
+    args)
+  (cl-define-compiler-macro macrostep-dummy-function (&rest args)
+    `(compile-time expansion of ,@args))
+
+  (macrostep-with-text
+      '(progn
+        (first body form)
+        (macrostep-dummy-function first second third)
+        (remaining body forms))
+    (macrostep-should-expand
+     '(macrostep-dummy-function first second third)
+     '(compile-time expansion of first second third))))
+
+(ert-deftest macrostep-fontify-compiler-macros ()
+  "Test that compiler-macros are fontified in macro-expansions"
+  ;; definitions
+  (defmacro macrostep-dummy-macro (&rest args)
+    `(expansion including (macrostep-dummy-function ,@args)))
+  (defun macrostep-dummy-function (&rest args)
+    args)
+  (cl-define-compiler-macro macrostep-dummy-4 (&rest args)
+    `(compile-time expansion of ,@args))
+
+  (macrostep-with-text
+      '(progn
+        (first body form)
+        (second body form)
+        (macrostep-dummy-macro first second third)
+        (remaining body forms))
+    (macrostep-should-expand
+     '(macrostep-dummy-macro first second third)
+     '(expansion including (macrostep-dummy-function first second third))
+     t)
+    (macrostep-goto "(macrostep-dummy-function")
+    (should
+     (eq (get-char-property (1+ (point)) 'font-lock-face)
+	 'macrostep-compiler-macro-face))
+    
+    (macrostep-should-expand
+     '(macrostep-dummy-function first second third)
+     '(compile-time expansion of first second third))))
 
 
 ;;;; Tests for C macro expansion
