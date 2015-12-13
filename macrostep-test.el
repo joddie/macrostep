@@ -457,4 +457,6 @@ XSTRING (Lisp_Object a)
 (when noninteractive
   (load-file (expand-file-name "macrostep.el"
                                (file-name-directory load-file-name)))
-  (ert-run-tests-batch "^macrostep"))
+  (let ((stats (ert-run-tests-batch "^macrostep")))
+        (if noninteractive
+            (kill-emacs (ert-stats-completed-unexpected stats)))))
