@@ -602,14 +602,18 @@ behaviors."
                 (macrostep-collapse-overlays-in (point) end)
                 (delete-region (point) end)
                 ;; Create a new overlay
-                (let ((overlay
-                       (make-overlay start
-                                     (if (looking-at "\n")
-                                         (1+ (point))
-                                       (point)))))
+                (let* ((overlay
+                        (make-overlay start
+                                      (if (looking-at "\n")
+                                          (1+ (point))
+                                        (point))))
+                       (highlight-overlay (unless macrostep-expansion-buffer
+                                            (copy-overlay overlay))))
                   (unless macrostep-expansion-buffer
                     ;; Highlight the overlay in original source buffers only
-                    (overlay-put overlay 'face 'macrostep-expansion-highlight-face))
+                    (overlay-put highlight-overlay 'face 'macrostep-expansion-highlight-face)
+                    (overlay-put highlight-overlay 'priority -1)
+                    (overlay-put overlay 'macrostep-highlight-overlay highlight-overlay))
                   (overlay-put overlay 'priority priority)
                   (overlay-put overlay 'macrostep-original-text text)
                   (overlay-put overlay 'macrostep-gensym-depth macrostep-gensym-depth)
@@ -708,6 +712,8 @@ Also removes the overlay from `macrostep-overlays'."
     ;; Remove overlay from the list and delete it
     (setq macrostep-overlays
           (delq overlay macrostep-overlays))
+    (let ((highlight-overlay (overlay-get overlay 'macrostep-highlight-overlay)))
+      (when highlight-overlay (delete-overlay highlight-overlay)))
     (delete-overlay overlay)))
 
 (defun macrostep-collapse-overlays-in (start end)
@@ -715,10 +721,11 @@ Also removes the overlay from `macrostep-overlays'."
 
 Will not collapse overlays that begin at START and end at END."
   (dolist (ol (overlays-in start end))
-    (if (and (> (overlay-start ol) start)
-	     (< (overlay-end ol) end)
-	     (overlay-get ol 'macrostep-original-text))
-	(macrostep-collapse-overlay ol t))))
+    (when (and (overlay-buffer ol)        ; collapsing may delete other overlays
+               (> (overlay-start ol) start)
+               (< (overlay-end ol) end)
+               (overlay-get ol 'macrostep-original-text))
+      (macrostep-collapse-overlay ol t))))
 
 
 ;;; Emacs Lisp implementation
