@@ -786,7 +786,7 @@ the macro definition, as a function.
 
 If `macrostep-expand-compiler-macros' is non-nil and FORM would
 be compiled using a compiler macro, TYPE is the symbol
-`compmiler-macro' and DEFINITION is the function that implements
+`compiler-macro' and DEFINITION is the function that implements
 the compiler macro.
 
 If FORM is an invocation of an autoloaded macro, the behavior
