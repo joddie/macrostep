@@ -816,7 +816,7 @@ value of DEFINITION in the result will be nil."
                     ((macro)
                      `(macro . ,(cdr fun)))
                     ((autoload)
-                     (when (eq (nth 4 fun) 'macro)
+                     (when (memq (nth 4 fun) '(macro t))
                        (if inhibit-autoload
                            `(macro . nil)
                          (load-library (nth 1 fun))
