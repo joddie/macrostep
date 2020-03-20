@@ -340,8 +340,12 @@ buffer.")
   :group 'macrostep)
 
 (defface macrostep-expansion-highlight-face
-  '((((min-colors 16581375) (background light)) :background "#eee8d5")
-    (((min-colors 16581375) (background dark)) :background "#222222"))
+  `((((min-colors 16581375) (background light))
+     ,@(and (>= emacs-major-version 27) '(:extend t))
+     :background "#eee8d5")
+    (((min-colors 16581375) (background dark))
+     ,@(and (>= emacs-major-version 27) '(:extend t))
+     :background "#222222"))
   "Face for macro-expansion highlight."
   :group 'macrostep)
 
