@@ -1042,12 +1042,12 @@ should be dynamically let-bound around calls to this function."
    ((listp sexp)
     ;; Print quoted and quasiquoted forms nicely.
     (let ((head (car sexp)))
-      (cond ((and (eq head 'quote)	; quote
-		  (= (length sexp) 2))
-	     (insert "'")
+      (cond ((and (memq head '(quote function)) ; quote/sharpquote
+                  (= (length sexp) 2))
+	     (insert (if (eq 'quote head) "'" "#'"))
 	     (macrostep-print-sexp (cadr sexp)))
 
-            ((and (eq head '\`)         ; backquote
+            ((and (eq head '\`)                 ; backquote
                   (= (length sexp) 2))
              (if (assq sexp macrostep-collected-macro-form-alist)
                  (macrostep-propertize
