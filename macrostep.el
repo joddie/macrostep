@@ -1016,6 +1016,12 @@ Controls the printing of sub-forms in `macrostep-print-sexp'.")
                     collect `(put-text-property ,start (point)
                                                 ,key ,value))))))
 
+(defun macrostep--quote-p (quote-types sexp)
+  "Check whether SEXP is `quote'-like form.
+QUOTE-TYPES is the list of quote types to be checked for (e.g.
+`quote', `backquote')."
+  (and (memq (car sexp) quote-types) (consp (cdr sexp)) (null (cddr sexp))))
+
 (defun macrostep-print-sexp (sexp)
   "Insert SEXP like `print', fontifying macro forms and uninterned symbols.
 
@@ -1042,13 +1048,11 @@ should be dynamically let-bound around calls to this function."
    ((listp sexp)
     ;; Print quoted and quasiquoted forms nicely.
     (let ((head (car sexp)))
-      (cond ((and (eq head 'quote)	; quote
-		  (= (length sexp) 2))
-	     (insert "'")
+      (cond ((macrostep--quote-p '(quote function) sexp) ; quote/sharpquote
+	     (insert (if (eq 'quote head) "'" "#'"))
 	     (macrostep-print-sexp (cadr sexp)))
 
-            ((and (eq head '\`)         ; backquote
-                  (= (length sexp) 2))
+            ((macrostep--quote-p '(\`) sexp) ; backquote
              (if (assq sexp macrostep-collected-macro-form-alist)
                  (macrostep-propertize
                      (insert "`")
@@ -1058,8 +1062,7 @@ should be dynamically let-bound around calls to this function."
                (insert "`"))
              (macrostep-print-sexp (cadr sexp)))
 
-	    ((and (memq head '(\, \,@)) ; unquote
-		  (= (length sexp) 2))
+	    ((macrostep--quote-p '(\, \,@) sexp) ; unquote
 	     (princ head (current-buffer))
 	     (macrostep-print-sexp (cadr sexp)))
 
@@ -1075,17 +1078,17 @@ should be dynamically let-bound around calls to this function."
                        ;; Save the real expansion as a text property on the
                        ;; opening paren
                        (macrostep-propertize
-                        (insert "(")
-                        'macrostep-macro-start t
-                        'macrostep-expanded-text sexp
-                        'macrostep-environment environment)
+                           (insert "(")
+                         'macrostep-macro-start t
+                         'macrostep-expanded-text sexp
+                         'macrostep-environment environment)
                        ;; Fontify the head of the macro
                        (macrostep-propertize
-                        (macrostep-print-sexp head)
-                        'font-lock-face
-                        (if macro?
-                            'macrostep-macro-face
-                          'macrostep-compiler-macro-face)))
+                           (macrostep-print-sexp head)
+                         'font-lock-face
+                         (if macro?
+                             'macrostep-macro-face
+                           'macrostep-compiler-macro-face)))
                    ;; Not a macro form
                    (insert "(")
                    (macrostep-print-sexp head))))
