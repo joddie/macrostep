@@ -6,7 +6,7 @@
 ;; Maintainer: joddie <j.j.oddie@gmail.com>
 ;; Created:    16 January 2012
 ;; Updated:    07 December 2015
-;; Version:    0.9
+;; Version:    0.10
 ;; Keywords:   lisp, languages, macro, debugging
 ;; Url:        https://github.com/joddie/macrostep
 ;; Package-Requires: ((cl-lib "0.5"))
