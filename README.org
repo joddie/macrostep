@@ -1,3 +1,10 @@
+
+* NOTICE: Obsolete repository
+
+  This repository (github.com/joddie/macrostep) is no longer
+  maintained. Please go to https://github.com/emacsorphanage/macrostep
+  for the currently developed version of this package.
+
 * macrostep: interactive macro-expander
 
    =macrostep= is an Emacs minor mode for interactively stepping
